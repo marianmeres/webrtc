@@ -5,12 +5,12 @@ import { resolve } from "https://deno.land/std@0.203.0/path/mod.ts";
 const configPath = resolve("./deno.json");
 
 await esbuild.build({
-  plugins: [...denoPlugins({ configPath })],
-  entryPoints: ["./example/main.ts", "./example/p2p.ts", "./example/peer.ts"],
-  outdir: "./example",
-  bundle: true,
-  format: "esm",
+	plugins: [...denoPlugins({ configPath })],
+	entryPoints: ["./example/main.ts", "./example/p2p.ts", "./example/peer.ts"],
+	outdir: "./example",
+	bundle: true,
+	format: "esm",
 });
 
 await esbuild.stop();
-console.log("Build complete: example/main.js, example/p2p.js, example/peer.js");
+console.log("Build complete");

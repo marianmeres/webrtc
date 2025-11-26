@@ -9,7 +9,7 @@ import {
 } from "./types.ts";
 
 export class WebRtcManager {
-	#fsm: FSM<any, any>;
+	fsm: FSM<any, any>;
 	#pubsub: PubSub;
 	#pc: RTCPeerConnection | null = null;
 	#factory: WebRtcFactory;
@@ -17,6 +17,8 @@ export class WebRtcManager {
 	#localStream: MediaStream | null = null;
 	#remoteStream: MediaStream | null = null;
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
+	#reconnectAttempts: number = 0;
+	#reconnectTimer: number | null = null;
 
 	constructor(factory: WebRtcFactory, config: WebRtcManagerConfig = {}) {
 		this.#factory = factory;
@@ -24,7 +26,7 @@ export class WebRtcManager {
 		this.#pubsub = new PubSub();
 
 		// Initialize FSM
-		this.#fsm = new FSM({
+		this.fsm = new FSM({
 			initial: WebRtcState.IDLE,
 			states: {
 				[WebRtcState.IDLE]: {
@@ -49,9 +51,17 @@ export class WebRtcManager {
 						[WebRtcFsmEvent.ERROR]: WebRtcState.ERROR,
 					},
 				},
+				[WebRtcState.RECONNECTING]: {
+					on: {
+						[WebRtcFsmEvent.CONNECT]: WebRtcState.CONNECTING,
+						[WebRtcFsmEvent.DISCONNECT]: WebRtcState.DISCONNECTED,
+						[WebRtcFsmEvent.RESET]: WebRtcState.IDLE,
+					},
+				},
 				[WebRtcState.DISCONNECTED]: {
 					on: {
 						[WebRtcFsmEvent.CONNECT]: WebRtcState.CONNECTING,
+						[WebRtcFsmEvent.RECONNECTING]: WebRtcState.RECONNECTING,
 						[WebRtcFsmEvent.RESET]: WebRtcState.IDLE,
 					},
 				},
@@ -65,11 +75,15 @@ export class WebRtcManager {
 	// --- Public API ---
 
 	get state(): WebRtcState {
-		return this.#fsm.state as WebRtcState;
+		return this.fsm.state as WebRtcState;
 	}
 
 	on(event: keyof WebRtcEvents, handler: (data: any) => void) {
 		return this.#pubsub.subscribe(event, handler);
+	}
+
+	subscribe(handler: (data: any) => void) {
+		return this.#pubsub.subscribe("change", handler);
 	}
 
 	async initialize() {
@@ -79,6 +93,12 @@ export class WebRtcManager {
 		try {
 			this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
 			this.#setupPcListeners();
+
+			// Always setup to receive audio, even if we don't enable microphone
+			// This ensures the SDP includes audio media line
+			if (!this.#config.enableMicrophone) {
+				this.#pc.addTransceiver('audio', { direction: 'recvonly' });
+			}
 
 			if (this.#config.enableMicrophone) {
 				await this.enableMicrophone(true);
@@ -103,7 +123,7 @@ export class WebRtcManager {
 			// Clean up old connection
 			this.#cleanup();
 			// Reset to IDLE and reinitialize
-			this.#fsm.transition(WebRtcFsmEvent.RESET);
+			this.fsm.transition(WebRtcFsmEvent.RESET);
 			await this.initialize();
 			// Stay in INITIALIZING state - caller needs to create offer/answer
 			return;
@@ -116,19 +136,6 @@ export class WebRtcManager {
 			return;
 
 		this.#dispatch(WebRtcFsmEvent.CONNECT);
-
-		// Here we would typically create offer, but that depends on signaling.
-		// Since signaling is not part of requirements (just "connection manager"),
-		// we assume the consumer will drive the signaling using the PC exposed or methods.
-		// However, to be "testable without actual webrtc connection", we might need to expose
-		// createOffer/Answer wrappers.
-
-		// For now, let's just simulate connection establishment if it's a mock?
-		// No, the logic should be real.
-		// If we are the initiator:
-		// const offer = await this._pc!.createOffer();
-		// await this._pc!.setLocalDescription(offer);
-		// ... send offer via signaling ...
 	}
 
 	async enableMicrophone(enable: boolean) {
@@ -271,12 +278,24 @@ export class WebRtcManager {
 		}
 	}
 
+	async iceRestart(): Promise<boolean> {
+		if (!this.#pc) return false;
+		try {
+			const offer = await this.#pc.createOffer({ iceRestart: true });
+			await this.#pc.setLocalDescription(offer);
+			return true;
+		} catch (e) {
+			this.#error(e);
+			return false;
+		}
+	}
+
 	// --- Private ---
 
 	#dispatch(event: WebRtcFsmEvent) {
-		const oldState = this.#fsm.state;
-		this.#fsm.transition(event);
-		const newState = this.#fsm.state;
+		const oldState = this.fsm.state;
+		this.fsm.transition(event);
+		const newState = this.fsm.state;
 
 		if (oldState !== newState) {
 			this.#pubsub.publish("state_change", newState);
@@ -295,12 +314,13 @@ export class WebRtcManager {
 		this.#pc.onconnectionstatechange = () => {
 			const state = this.#pc!.connectionState;
 			if (state === "connected") {
+				// Connection successful - reset reconnect attempts
+				this.#reconnectAttempts = 0;
 				this.#dispatch(WebRtcFsmEvent.CONNECTED);
-			} else if (
-				state === "disconnected" ||
-				state === "closed" ||
-				state === "failed"
-			) {
+			} else if (state === "failed") {
+				// Connection failed - attempt reconnection if enabled
+				this.#handleConnectionFailure();
+			} else if (state === "disconnected" || state === "closed") {
 				this.#dispatch(WebRtcFsmEvent.DISCONNECT);
 			}
 		};
@@ -316,8 +336,6 @@ export class WebRtcManager {
 			const dc = event.channel;
 			this.#setupDataChannelListeners(dc);
 			this.#dataChannels.set(dc.label, dc);
-			// Maybe publish a specific event for incoming data channel?
-			// For now, let's assume the consumer might want to know.
 		};
 
 		this.#pc.onicecandidate = (event) => {
@@ -326,6 +344,12 @@ export class WebRtcManager {
 	}
 
 	#cleanup() {
+		// Clear any pending reconnect timers
+		if (this.#reconnectTimer !== null) {
+			clearTimeout(this.#reconnectTimer);
+			this.#reconnectTimer = null;
+		}
+
 		// Close all data channels
 		this.#dataChannels.forEach((dc) => {
 			if (dc.readyState !== "closed") {
@@ -349,6 +373,68 @@ export class WebRtcManager {
 		this.#remoteStream = null;
 	}
 
+	#handleConnectionFailure() {
+		this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+
+		// Check if auto-reconnect is enabled
+		if (!this.#config.autoReconnect) {
+			return;
+		}
+
+		const maxAttempts = this.#config.maxReconnectAttempts ?? 5;
+
+		// Check if we've exceeded max attempts
+		if (this.#reconnectAttempts >= maxAttempts) {
+			this.#pubsub.publish("reconnect_failed", {
+				attempts: this.#reconnectAttempts,
+			});
+			return;
+		}
+
+		// Transition to RECONNECTING state
+		this.#dispatch(WebRtcFsmEvent.RECONNECTING);
+
+		// Attempt reconnection with exponential backoff
+		this.#attemptReconnect();
+	}
+
+	#attemptReconnect() {
+		this.#reconnectAttempts++;
+		const baseDelay = this.#config.reconnectDelay ?? 1000;
+		const delay = baseDelay * Math.pow(2, this.#reconnectAttempts - 1);
+
+		// Try ICE restart first (attempts 1-2), then full reconnect
+		const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
+
+		this.#pubsub.publish("reconnecting", {
+			attempt: this.#reconnectAttempts,
+			strategy,
+		});
+
+		this.#reconnectTimer = setTimeout(async () => {
+			this.#reconnectTimer = null;
+
+			if (strategy === "ice-restart" && this.#pc) {
+				// Try ICE restart - keep existing connection
+				const success = await this.iceRestart();
+				if (!success) {
+					// ICE restart failed, will try again or switch to full reconnect
+					this.#handleConnectionFailure();
+				}
+				// If successful, onconnectionstatechange will reset attempts
+			} else {
+				// Full reconnection - create new connection
+				try {
+					await this.connect();
+					// If successful, onconnectionstatechange will reset attempts
+				} catch (e) {
+					console.error("Reconnection failed:", e);
+					this.#handleConnectionFailure();
+				}
+			}
+		}, delay) as unknown as number;
+	}
+
 	#setupDataChannelListeners(dc: RTCDataChannel) {
 		dc.onopen = () => {
 			this.#pubsub.publish("data_channel_open", dc);
@@ -365,7 +451,6 @@ export class WebRtcManager {
 		};
 		dc.onerror = (error) => {
 			console.error("Data Channel Error:", error);
-			// Optional: publish error
 			this.#pubsub.publish("error", error);
 		};
 	}

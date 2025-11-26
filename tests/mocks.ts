@@ -113,6 +113,16 @@ export class MockRTCPeerConnection extends EventTarget {
         return channel as unknown as RTCDataChannel;
     }
 
+    addTransceiver(trackOrKind: MediaStreamTrack | string, init?: RTCRtpTransceiverInit): RTCRtpTransceiver {
+        // Mock implementation - just return a basic transceiver
+        return {
+            mid: null,
+            sender: { track: null } as unknown as RTCRtpSender,
+            receiver: { track: null } as unknown as RTCRtpReceiver,
+            direction: init?.direction || 'sendrecv',
+        } as RTCRtpTransceiver;
+    }
+
     createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
         return Promise.resolve({ type: "offer", sdp: "mock-offer-sdp" });
     }

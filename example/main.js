@@ -256,7 +256,7 @@ var FSM = class {
 
 // src/webrtc_manager.ts
 var WebRtcManager = class {
-  #fsm;
+  fsm;
   #pubsub;
   #pc = null;
   #factory;
@@ -264,11 +264,13 @@ var WebRtcManager = class {
   #localStream = null;
   #remoteStream = null;
   #dataChannels = /* @__PURE__ */ new Map();
+  #reconnectAttempts = 0;
+  #reconnectTimer = null;
   constructor(factory2, config = {}) {
     this.#factory = factory2;
     this.#config = config;
     this.#pubsub = new PubSub();
-    this.#fsm = new FSM({
+    this.fsm = new FSM({
       initial: "IDLE" /* IDLE */,
       states: {
         ["IDLE" /* IDLE */]: {
@@ -293,9 +295,17 @@ var WebRtcManager = class {
             ["ERROR" /* ERROR */]: "ERROR" /* ERROR */
           }
         },
+        ["RECONNECTING" /* RECONNECTING */]: {
+          on: {
+            ["CONNECT" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
+            ["DISCONNECT" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
+            ["RESET" /* RESET */]: "IDLE" /* IDLE */
+          }
+        },
         ["DISCONNECTED" /* DISCONNECTED */]: {
           on: {
             ["CONNECT" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
+            ["RECONNECTING" /* RECONNECTING */]: "RECONNECTING" /* RECONNECTING */,
             ["RESET" /* RESET */]: "IDLE" /* IDLE */
           }
         },
@@ -307,10 +317,13 @@ var WebRtcManager = class {
   }
   // --- Public API ---
   get state() {
-    return this.#fsm.state;
+    return this.fsm.state;
   }
   on(event, handler) {
     return this.#pubsub.subscribe(event, handler);
+  }
+  subscribe(handler) {
+    return this.#pubsub.subscribe("change", handler);
   }
   async initialize() {
     if (this.state !== "IDLE" /* IDLE */)
@@ -319,6 +332,9 @@ var WebRtcManager = class {
     try {
       this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
       this.#setupPcListeners();
+      if (!this.#config.enableMicrophone) {
+        this.#pc.addTransceiver("audio", { direction: "recvonly" });
+      }
       if (this.#config.enableMicrophone) {
         await this.enableMicrophone(true);
       }
@@ -335,7 +351,7 @@ var WebRtcManager = class {
     }
     if (this.state === "DISCONNECTED" /* DISCONNECTED */) {
       this.#cleanup();
-      this.#fsm.transition("RESET" /* RESET */);
+      this.fsm.transition("RESET" /* RESET */);
       await this.initialize();
       return;
     }
@@ -462,11 +478,23 @@ var WebRtcManager = class {
       return false;
     }
   }
+  async iceRestart() {
+    if (!this.#pc)
+      return false;
+    try {
+      const offer = await this.#pc.createOffer({ iceRestart: true });
+      await this.#pc.setLocalDescription(offer);
+      return true;
+    } catch (e) {
+      this.#error(e);
+      return false;
+    }
+  }
   // --- Private ---
   #dispatch(event) {
-    const oldState = this.#fsm.state;
-    this.#fsm.transition(event);
-    const newState = this.#fsm.state;
+    const oldState = this.fsm.state;
+    this.fsm.transition(event);
+    const newState = this.fsm.state;
     if (oldState !== newState) {
       this.#pubsub.publish("state_change", newState);
     }
@@ -482,8 +510,11 @@ var WebRtcManager = class {
     this.#pc.onconnectionstatechange = () => {
       const state = this.#pc.connectionState;
       if (state === "connected") {
+        this.#reconnectAttempts = 0;
         this.#dispatch("CONNECTED" /* CONNECTED */);
-      } else if (state === "disconnected" || state === "closed" || state === "failed") {
+      } else if (state === "failed") {
+        this.#handleConnectionFailure();
+      } else if (state === "disconnected" || state === "closed") {
         this.#dispatch("DISCONNECT" /* DISCONNECT */);
       }
     };
@@ -503,6 +534,10 @@ var WebRtcManager = class {
     };
   }
   #cleanup() {
+    if (this.#reconnectTimer !== null) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = null;
+    }
     this.#dataChannels.forEach((dc) => {
       if (dc.readyState !== "closed") {
         dc.close();
@@ -518,6 +553,47 @@ var WebRtcManager = class {
       this.#pc = null;
     }
     this.#remoteStream = null;
+  }
+  #handleConnectionFailure() {
+    this.#dispatch("DISCONNECT" /* DISCONNECT */);
+    if (!this.#config.autoReconnect) {
+      return;
+    }
+    const maxAttempts = this.#config.maxReconnectAttempts ?? 5;
+    if (this.#reconnectAttempts >= maxAttempts) {
+      this.#pubsub.publish("reconnect_failed", {
+        attempts: this.#reconnectAttempts
+      });
+      return;
+    }
+    this.#dispatch("RECONNECTING" /* RECONNECTING */);
+    this.#attemptReconnect();
+  }
+  #attemptReconnect() {
+    this.#reconnectAttempts++;
+    const baseDelay = this.#config.reconnectDelay ?? 1e3;
+    const delay = baseDelay * Math.pow(2, this.#reconnectAttempts - 1);
+    const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
+    this.#pubsub.publish("reconnecting", {
+      attempt: this.#reconnectAttempts,
+      strategy
+    });
+    this.#reconnectTimer = setTimeout(async () => {
+      this.#reconnectTimer = null;
+      if (strategy === "ice-restart" && this.#pc) {
+        const success = await this.iceRestart();
+        if (!success) {
+          this.#handleConnectionFailure();
+        }
+      } else {
+        try {
+          await this.connect();
+        } catch (e) {
+          console.error("Reconnection failed:", e);
+          this.#handleConnectionFailure();
+        }
+      }
+    }, delay);
   }
   #setupDataChannelListeners(dc) {
     dc.onopen = () => {
