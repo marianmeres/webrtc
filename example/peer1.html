@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peer 1 (Caller)</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto; }
+        h1 { color: #007bff; }
+        .controls { margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+        button { padding: 0.5rem 1rem; cursor: pointer; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { font-weight: bold; margin-bottom: 1rem; color: #007bff; }
+        #logs { background: #f0f0f0; padding: 0.5rem; height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.85em; border-radius: 4px; margin-bottom: 1rem; }
+        .chat { display: flex; flex-direction: column; gap: 0.5rem; }
+        .chat input { padding: 0.5rem; }
+        .chat-messages { background: #fff; border: 1px solid #ddd; padding: 0.5rem; height: 200px; overflow-y: auto; font-size: 0.9em; border-radius: 4px; }
+        .msg { padding: 0.25rem; border-bottom: 1px solid #eee; }
+        .msg-sent { color: #007bff; }
+        .msg-received { color: #28a745; }
+        .info { background: #e7f3ff; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; border-left: 4px solid #007bff; }
+    </style>
+</head>
+<body>
+    <h1>🔵 Peer 1 (Caller)</h1>
+    
+    <div class="info">
+        <strong>Instructions:</strong>
+        <ol>
+            <li>Open <code>peer2.html</code> in another browser window/tab</li>
+            <li>Click "Initialize" here and in Peer 2</li>
+            <li>Click "Create Offer" here</li>
+            <li>Go to Peer 2 window and click "Create Answer"</li>
+            <li>Wait for connection, then chat!</li>
+        </ol>
+    </div>
+    
+    <div id="status">State: IDLE</div>
+    
+    <div class="controls">
+        <button id="btn-init">Initialize</button>
+        <button id="btn-offer" disabled>Create Offer</button>
+        <button id="btn-disconnect" disabled>Disconnect</button>
+        <button id="btn-reconnect" disabled>Reconnect</button>
+    </div>
+    
+    <h3>Logs</h3>
+    <div id="logs"></div>
+    
+    <h3>Chat</h3>
+    <div class="chat">
+        <div class="chat-messages" id="chat"></div>
+        <input type="text" id="input" placeholder="Type message..." disabled>
+        <button id="btn-send" disabled>Send</button>
+    </div>
+
+    <script type="module" src="./peer.js"></script>
+</body>
+</html>
