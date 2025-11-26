@@ -881,7 +881,7 @@ var WebRtcManager = class {
   }
 };
 
-// example/main.ts
+// example/audio-peer.ts
 var BrowserWebRtcFactory = class {
   createPeerConnection(config) {
     return new RTCPeerConnection(config);
@@ -893,76 +893,507 @@ var BrowserWebRtcFactory = class {
     return navigator.mediaDevices.enumerateDevices();
   }
 };
+var isPeer1 = window.location.pathname.includes("peer1");
+var peerNumber = isPeer1 ? 1 : 2;
+var signalingMode = "localStorage";
+var SIGNALING_KEY_OFFER = "webrtc_audio_offer";
+var SIGNALING_KEY_ANSWER = "webrtc_audio_answer";
+var SIGNALING_KEY_ICE_1 = "webrtc_audio_ice_1";
+var SIGNALING_KEY_ICE_2 = "webrtc_audio_ice_2";
+var SESSION_ID = "audio-test-session";
+var API_BASE = `${window.location.origin}/api/session/${SESSION_ID}`;
 var factory = new BrowserWebRtcFactory();
-var manager = new WebRtcManager(factory, {
-  peerConfig: {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  },
+var peer = new WebRtcManager(factory, {
+  peerConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
+  enableMicrophone: false,
   debug: true
 });
-var statusEl = document.getElementById("status");
-var logsEl = document.getElementById("logs");
+var status = document.getElementById("status");
+var logs = document.getElementById("logs");
 var btnInit = document.getElementById("btn-init");
-var btnConnect = document.getElementById("btn-connect");
-var btnDisconnect = document.getElementById(
-  "btn-disconnect"
-);
-var btnMicOn = document.getElementById("btn-mic-on");
-var btnMicOff = document.getElementById("btn-mic-off");
-function log(msg, data) {
-  const div = document.createElement("div");
-  div.className = "log-entry";
+var btnOffer = document.getElementById("btn-offer");
+var btnAnswer = document.getElementById("btn-answer");
+var btnDisconnect = document.getElementById("btn-disconnect");
+var btnReset = document.getElementById("btn-reset");
+var btnMicEnable = document.getElementById("btn-mic-enable");
+var btnMicDisable = document.getElementById("btn-mic-disable");
+var micSelect = document.getElementById("mic-select");
+var remoteAudio = document.getElementById("remote-audio");
+var localVizCanvas = document.getElementById("local-viz");
+var remoteVizCanvas = document.getElementById("remote-viz");
+var signalingModeSelect = document.getElementById("signaling-mode");
+var statBytesSent = document.getElementById("stat-bytes-sent");
+var statBytesReceived = document.getElementById("stat-bytes-received");
+var statAudioLocal = document.getElementById("stat-audio-local");
+var statAudioRemote = document.getElementById("stat-audio-remote");
+var localAnalyser = null;
+var remoteAnalyser = null;
+var localDataArray = null;
+var remoteDataArray = null;
+var audioContext = null;
+var animationFrameId = null;
+function log(msg, type = "info") {
   const time = (/* @__PURE__ */ new Date()).toISOString().split("T")[1].split(".")[0];
-  const text = data ? `${msg} ${JSON.stringify(data)}` : msg;
-  div.innerHTML = `<span class="log-time">${time}</span> ${text}`;
-  logsEl.prepend(div);
-  console.log(msg, data || "");
+  const div = document.createElement("div");
+  div.className = `log-entry log-${type}`;
+  div.textContent = `[${time}] ${msg}`;
+  logs.prepend(div);
+  console.log(`Peer ${peerNumber}:`, msg);
 }
 function updateButtons(state) {
-  statusEl.textContent = `State: ${state}`;
+  status.textContent = `State: ${state}`;
   btnInit.disabled = state !== "IDLE" /* IDLE */;
-  btnConnect.disabled = state !== "INITIALIZING" /* INITIALIZING */ && state !== "DISCONNECTED" /* DISCONNECTED */;
+  if (isPeer1) {
+    btnOffer.disabled = state !== "INITIALIZING" /* INITIALIZING */;
+  } else {
+    btnAnswer.disabled = state !== "INITIALIZING" /* INITIALIZING */;
+  }
   btnDisconnect.disabled = state !== "CONNECTED" /* CONNECTED */ && state !== "CONNECTING" /* CONNECTING */;
+  btnReset.disabled = state === "IDLE" /* IDLE */;
 }
-manager.on("state_change", (state) => {
-  log("State changed:", state);
+async function loadMicrophoneDevices() {
+  try {
+    const devices = await peer.getAudioInputDevices();
+    micSelect.innerHTML = "";
+    if (devices.length === 0) {
+      micSelect.innerHTML = "<option>No devices available</option>";
+      micSelect.disabled = true;
+      return;
+    }
+    devices.forEach((device) => {
+      const option = document.createElement("option");
+      option.value = device.deviceId;
+      option.textContent = device.label || `Microphone ${device.deviceId.slice(0, 8)}`;
+      micSelect.appendChild(option);
+    });
+    micSelect.disabled = false;
+    log(`Found ${devices.length} audio input device(s)`, "success");
+  } catch (e) {
+    log(`Failed to load devices: ${e}`, "error");
+  }
+}
+function setupAudioVisualization(stream, isLocal) {
+  try {
+    if (!audioContext) {
+      audioContext = new AudioContext();
+      log(`AudioContext created, state: ${audioContext.state}`);
+    }
+    if (audioContext.state === "suspended") {
+      audioContext.resume().then(() => {
+        log(`AudioContext resumed, state: ${audioContext.state}`);
+      });
+    }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      log(`${isLocal ? "Local" : "Remote"} stream has no audio tracks`, "error");
+      return;
+    }
+    log(`${isLocal ? "Local" : "Remote"} stream has ${audioTracks.length} audio track(s)`);
+    audioTracks.forEach((track, i) => {
+      log(`  Track ${i}: ${track.kind}, enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
+    });
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    if (isLocal) {
+      localAnalyser = analyser;
+      localDataArray = dataArray;
+    } else {
+      remoteAnalyser = analyser;
+      remoteDataArray = dataArray;
+    }
+    if (!animationFrameId) {
+      animate();
+      log("Animation loop started");
+    }
+    log(`${isLocal ? "Local" : "Remote"} audio visualization ready`, "success");
+    setTimeout(() => {
+      const testArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(testArray);
+      const hasData = Array.from(testArray).some((v) => v > 0);
+      log(`${isLocal ? "Local" : "Remote"} analyser has data: ${hasData}, max value: ${Math.max(...testArray)}`);
+    }, 1e3);
+  } catch (e) {
+    log(`Failed to setup ${isLocal ? "local" : "remote"} visualization: ${e}`, "error");
+    console.error("Visualization setup error:", e);
+  }
+}
+var debugCounter = 0;
+function animate() {
+  animationFrameId = requestAnimationFrame(animate);
+  if (localAnalyser && localDataArray) {
+    drawVisualization(localVizCanvas, localAnalyser, localDataArray);
+    updateAudioLevel(localAnalyser, localDataArray, statAudioLocal);
+  }
+  if (remoteAnalyser && remoteDataArray) {
+    drawVisualization(remoteVizCanvas, remoteAnalyser, remoteDataArray);
+    updateAudioLevel(remoteAnalyser, remoteDataArray, statAudioRemote);
+    debugCounter++;
+    if (debugCounter % 60 === 0) {
+      const testArray = new Uint8Array(remoteDataArray.length);
+      remoteAnalyser.getByteFrequencyData(testArray);
+      const max = Math.max(...testArray);
+      if (max > 0) {
+        console.log(`Remote visualization active, max frequency: ${max}`);
+      } else {
+        console.log("Remote visualization running but no audio data detected");
+      }
+    }
+  }
+}
+function drawVisualization(canvas, analyser, dataArray) {
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width = canvas.offsetWidth;
+  const height = canvas.height = canvas.offsetHeight;
+  analyser.getByteFrequencyData(dataArray);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, width, height);
+  const barWidth = width / dataArray.length * 2.5;
+  let x = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    const barHeight = dataArray[i] / 255 * height;
+    const r = barHeight + 25 * (i / dataArray.length);
+    const g = 250 * (i / dataArray.length);
+    const b = 50;
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+    x += barWidth + 1;
+  }
+}
+function updateAudioLevel(analyser, dataArray, element) {
+  analyser.getByteTimeDomainData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    const normalized = (dataArray[i] - 128) / 128;
+    sum += normalized * normalized;
+  }
+  const rms = Math.sqrt(sum / dataArray.length);
+  const level = Math.min(100, Math.floor(rms * 200));
+  element.textContent = `${level}%`;
+}
+var statsInterval = null;
+function startStatsUpdates() {
+  if (statsInterval)
+    return;
+  statsInterval = setInterval(async () => {
+    const stats = await peer.getStats();
+    if (!stats)
+      return;
+    let bytesSent = 0;
+    let bytesReceived = 0;
+    stats.forEach((report) => {
+      if (report.type === "outbound-rtp" && report.kind === "audio") {
+        bytesSent += report.bytesSent || 0;
+      }
+      if (report.type === "inbound-rtp" && report.kind === "audio") {
+        bytesReceived += report.bytesReceived || 0;
+      }
+    });
+    statBytesSent.textContent = formatBytes(bytesSent);
+    statBytesReceived.textContent = formatBytes(bytesReceived);
+  }, 1e3);
+}
+function stopStatsUpdates() {
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+  }
+}
+function formatBytes(bytes) {
+  if (bytes === 0)
+    return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+}
+async function sendOffer(offer) {
+  if (signalingMode === "localStorage") {
+    localStorage.setItem(SIGNALING_KEY_OFFER, JSON.stringify(offer));
+  } else {
+    await fetch(`${API_BASE}/offer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(offer)
+    });
+  }
+}
+async function getOffer() {
+  if (signalingMode === "localStorage") {
+    const offerStr = localStorage.getItem(SIGNALING_KEY_OFFER);
+    return offerStr ? JSON.parse(offerStr) : null;
+  } else {
+    const response = await fetch(`${API_BASE}/offer`);
+    return await response.json();
+  }
+}
+async function sendAnswer(answer) {
+  if (signalingMode === "localStorage") {
+    localStorage.setItem(SIGNALING_KEY_ANSWER, JSON.stringify(answer));
+    localStorage.setItem("peer2_audio_answer_ready", Date.now().toString());
+  } else {
+    await fetch(`${API_BASE}/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(answer)
+    });
+  }
+}
+async function getAnswer() {
+  if (signalingMode === "localStorage") {
+    const answerStr = localStorage.getItem(SIGNALING_KEY_ANSWER);
+    return answerStr ? JSON.parse(answerStr) : null;
+  } else {
+    const response = await fetch(`${API_BASE}/answer`);
+    return await response.json();
+  }
+}
+async function sendIceCandidate(candidate) {
+  if (signalingMode === "localStorage") {
+    const key = isPeer1 ? SIGNALING_KEY_ICE_1 : SIGNALING_KEY_ICE_2;
+    const existing = JSON.parse(localStorage.getItem(key) || "[]");
+    existing.push(candidate);
+    localStorage.setItem(key, JSON.stringify(existing));
+  } else {
+    const endpoint = isPeer1 ? "ice1" : "ice2";
+    await fetch(`${API_BASE}/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidate)
+    });
+  }
+}
+async function getIceCandidates(forPeer) {
+  if (signalingMode === "localStorage") {
+    const key = forPeer === 1 ? SIGNALING_KEY_ICE_1 : SIGNALING_KEY_ICE_2;
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } else {
+    const endpoint = forPeer === 1 ? "ice1" : "ice2";
+    const response = await fetch(`${API_BASE}/${endpoint}`);
+    return await response.json();
+  }
+}
+async function clearSignaling() {
+  if (signalingMode === "localStorage") {
+    localStorage.removeItem(SIGNALING_KEY_OFFER);
+    localStorage.removeItem(SIGNALING_KEY_ANSWER);
+    localStorage.removeItem(SIGNALING_KEY_ICE_1);
+    localStorage.removeItem(SIGNALING_KEY_ICE_2);
+    localStorage.removeItem("peer2_audio_answer_ready");
+  } else {
+    await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+  }
+}
+var answerPollingInterval = null;
+function startAnswerPolling() {
+  if (signalingMode !== "httpServer" || !isPeer1)
+    return;
+  if (answerPollingInterval)
+    return;
+  log("Polling for answer...");
+  answerPollingInterval = setInterval(async () => {
+    try {
+      const answer = await getAnswer();
+      if (answer) {
+        clearInterval(answerPollingInterval);
+        answerPollingInterval = null;
+        log("Answer received from polling", "success");
+        await handleAnswerReceived();
+      }
+    } catch (e) {
+      console.error("Error polling for answer:", e);
+    }
+  }, 500);
+}
+function stopAnswerPolling() {
+  if (answerPollingInterval) {
+    clearInterval(answerPollingInterval);
+    answerPollingInterval = null;
+  }
+}
+async function handleAnswerReceived() {
+  const answer = await getAnswer();
+  if (answer) {
+    log("Setting remote description (answer)...");
+    await peer.setRemoteDescription(answer);
+    const ice2 = await getIceCandidates(2);
+    for (const candidate of ice2) {
+      await peer.addIceCandidate(candidate);
+    }
+    log("Connection established!", "success");
+  }
+}
+peer.on("state_change", (state) => {
+  log(`State changed: ${state}`, "info");
   updateButtons(state);
-});
-manager.on("local_stream", (stream) => {
-  log("Local stream update:", stream ? `Active (${stream.id})` : "Inactive");
-  btnMicOn.disabled = !!stream;
-  btnMicOff.disabled = !stream;
-});
-manager.on("remote_stream", (stream) => {
-  log("Remote stream received:", stream ? stream.id : "null");
-  if (stream) {
-    const audio = new Audio();
-    audio.srcObject = stream;
-    audio.play().catch((e) => log("Auto-play failed", e));
+  if (state === "CONNECTED" /* CONNECTED */) {
+    startStatsUpdates();
+  } else {
+    stopStatsUpdates();
   }
 });
-manager.on("error", (err) => {
-  log("Error:", err);
+peer.on("local_stream", (stream) => {
+  if (stream) {
+    log("Local stream active", "success");
+    setupAudioVisualization(stream, true);
+    btnMicEnable.disabled = true;
+    btnMicDisable.disabled = false;
+  } else {
+    log("Local stream stopped", "info");
+    localAnalyser = null;
+    localDataArray = null;
+    btnMicEnable.disabled = false;
+    btnMicDisable.disabled = true;
+  }
+});
+peer.on("remote_stream", (stream) => {
+  if (stream) {
+    log("Remote stream received", "success");
+    log(`Remote stream ID: ${stream.id}`);
+    log(`Remote audio tracks: ${stream.getAudioTracks().length}`);
+    remoteAudio.srcObject = stream;
+    setupAudioVisualization(stream, false);
+    remoteAudio.onloadedmetadata = () => {
+      log("Remote audio metadata loaded");
+      if (!remoteAnalyser) {
+        setupAudioVisualization(stream, false);
+      }
+    };
+  } else {
+    log("Remote stream ended", "info");
+    remoteAudio.srcObject = null;
+    remoteAnalyser = null;
+    remoteDataArray = null;
+  }
+});
+peer.on("ice_candidate", (candidate) => {
+  if (candidate) {
+    log("ICE candidate generated");
+    sendIceCandidate(candidate.toJSON()).catch((e) => {
+      log(`Failed to send ICE candidate: ${e}`, "error");
+    });
+  }
+});
+peer.on("device_changed", async () => {
+  log("Audio devices changed", "info");
+  await loadMicrophoneDevices();
+});
+peer.on("microphone_failed", ({ error, reason }) => {
+  log(`Microphone failed: ${reason || error}`, "error");
+});
+peer.on("error", (error) => {
+  log(`Error: ${error}`, "error");
 });
 btnInit.onclick = async () => {
   log("Initializing...");
-  await manager.initialize();
+  await peer.initialize();
+  await loadMicrophoneDevices();
 };
-btnConnect.onclick = async () => {
-  log("Connecting...");
-  await manager.connect();
+btnMicEnable.onclick = async () => {
+  log("Enabling microphone...");
+  const success = await peer.enableMicrophone(true);
+  if (success) {
+    log("Microphone enabled", "success");
+  } else {
+    log("Failed to enable microphone", "error");
+  }
 };
+btnMicDisable.onclick = async () => {
+  log("Disabling microphone...");
+  await peer.enableMicrophone(false);
+  log("Microphone disabled", "info");
+};
+micSelect.onchange = async () => {
+  const deviceId = micSelect.value;
+  if (!deviceId)
+    return;
+  log(`Switching to microphone: ${micSelect.options[micSelect.selectedIndex].text}`);
+  const success = await peer.switchMicrophone(deviceId);
+  if (success) {
+    log("Microphone switched", "success");
+  } else {
+    log("Failed to switch microphone", "error");
+  }
+};
+if (isPeer1) {
+  btnOffer.onclick = async () => {
+    log("Creating offer...");
+    await peer.connect();
+    const offer = await peer.createOffer();
+    if (offer) {
+      await peer.setLocalDescription(offer);
+      await sendOffer(offer);
+      log("Offer created and sent", "success");
+      startAnswerPolling();
+    }
+  };
+} else {
+  btnAnswer.onclick = async () => {
+    const offer = await getOffer();
+    if (!offer) {
+      log("No offer found!", "error");
+      return;
+    }
+    log("Setting remote description (offer)...");
+    await peer.connect();
+    await peer.setRemoteDescription(offer);
+    const ice1 = await getIceCandidates(1);
+    for (const candidate of ice1) {
+      await peer.addIceCandidate(candidate);
+    }
+    log("Creating answer...");
+    const answer = await peer.createAnswer();
+    if (answer) {
+      await peer.setLocalDescription(answer);
+      await sendAnswer(answer);
+      log("Answer created and sent", "success");
+    }
+  };
+}
+if (isPeer1) {
+  window.addEventListener("storage", async (e) => {
+    if (e.key === "peer2_audio_answer_ready" && signalingMode === "localStorage") {
+      await handleAnswerReceived();
+    }
+  });
+}
 btnDisconnect.onclick = () => {
   log("Disconnecting...");
-  manager.disconnect();
+  peer.disconnect();
+  stopAnswerPolling();
 };
-btnMicOn.onclick = async () => {
-  log("Enabling mic...");
-  await manager.enableMicrophone(true);
+btnReset.onclick = () => {
+  log("Resetting...");
+  peer.reset();
+  stopAnswerPolling();
+  localAnalyser = null;
+  remoteAnalyser = null;
+  localDataArray = null;
+  remoteDataArray = null;
+  if (isPeer1) {
+    clearSignaling().catch((e) => {
+      log(`Failed to clear signaling: ${e}`, "error");
+    });
+  }
 };
-btnMicOff.onclick = async () => {
-  log("Disabling mic...");
-  await manager.enableMicrophone(false);
+signalingModeSelect.onchange = () => {
+  const newMode = signalingModeSelect.value;
+  signalingMode = newMode;
+  log(`Signaling mode changed to: ${newMode}`, "info");
+  if (isPeer1) {
+    clearSignaling().catch((e) => {
+      log(`Failed to clear signaling: ${e}`, "error");
+    });
+  }
 };
-updateButtons(manager.state);
-log("Ready.");
+signalingMode = signalingModeSelect.value;
+if (isPeer1) {
+  clearSignaling().catch((e) => {
+    console.error("Failed to clear signaling on load:", e);
+  });
+}
+log("Audio test ready - click Initialize to start", "success");
+updateButtons(peer.state);

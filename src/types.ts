@@ -49,8 +49,15 @@ export interface WebRtcEvents {
 	data_channel_message: { channel: RTCDataChannel; data: any };
 	data_channel_close: RTCDataChannel;
 	ice_candidate: RTCIceCandidate | null;
+	/**
+	 * Emitted when reconnection is being attempted.
+	 * For 'full' strategy reconnections, consumers should listen for this event
+	 * and re-establish signaling (create new offer/answer exchange).
+	 * The manager will call connect() but cannot handle the signaling automatically.
+	 */
 	reconnecting: { attempt: number; strategy: "ice-restart" | "full" };
 	reconnect_failed: { attempts: number };
 	device_changed: MediaDeviceInfo[];
+	microphone_failed: { error?: any; reason?: string };
 	error: Error;
 }

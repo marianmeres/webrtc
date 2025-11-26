@@ -6,7 +6,12 @@ const configPath = resolve("./deno.json");
 
 await esbuild.build({
 	plugins: [...denoPlugins({ configPath })],
-	entryPoints: ["./example/main.ts", "./example/p2p.ts", "./example/peer.ts"],
+	entryPoints: [
+		"./example/main.ts",
+		"./example/p2p.ts",
+		"./example/peer.ts",
+		"./example/audio-peer.ts",
+	],
 	outdir: "./example",
 	bundle: true,
 	format: "esm",

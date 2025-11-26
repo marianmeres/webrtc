@@ -275,58 +275,90 @@ var WebRtcManager = class {
       initial: "IDLE" /* IDLE */,
       states: {
         ["IDLE" /* IDLE */]: {
-          on: { ["INIT" /* INIT */]: "INITIALIZING" /* INITIALIZING */ }
+          on: { ["initialize" /* INIT */]: "INITIALIZING" /* INITIALIZING */ }
         },
         ["INITIALIZING" /* INITIALIZING */]: {
           on: {
-            ["CONNECT" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
-            ["ERROR" /* ERROR */]: "ERROR" /* ERROR */
+            ["connect" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
+            ["error" /* ERROR */]: "ERROR" /* ERROR */
           }
         },
         ["CONNECTING" /* CONNECTING */]: {
           on: {
-            ["CONNECTED" /* CONNECTED */]: "CONNECTED" /* CONNECTED */,
-            ["DISCONNECT" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
-            ["ERROR" /* ERROR */]: "ERROR" /* ERROR */
+            ["connected" /* CONNECTED */]: "CONNECTED" /* CONNECTED */,
+            ["disconnect" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
+            ["error" /* ERROR */]: "ERROR" /* ERROR */
           }
         },
         ["CONNECTED" /* CONNECTED */]: {
           on: {
-            ["DISCONNECT" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
-            ["ERROR" /* ERROR */]: "ERROR" /* ERROR */
+            ["disconnect" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
+            ["error" /* ERROR */]: "ERROR" /* ERROR */
           }
         },
         ["RECONNECTING" /* RECONNECTING */]: {
           on: {
-            ["CONNECT" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
-            ["DISCONNECT" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
-            ["RESET" /* RESET */]: "IDLE" /* IDLE */
+            ["connect" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
+            ["disconnect" /* DISCONNECT */]: "DISCONNECTED" /* DISCONNECTED */,
+            ["reset" /* RESET */]: "IDLE" /* IDLE */
           }
         },
         ["DISCONNECTED" /* DISCONNECTED */]: {
           on: {
-            ["CONNECT" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
-            ["RECONNECTING" /* RECONNECTING */]: "RECONNECTING" /* RECONNECTING */,
-            ["RESET" /* RESET */]: "IDLE" /* IDLE */
+            ["connect" /* CONNECT */]: "CONNECTING" /* CONNECTING */,
+            ["reconnecting" /* RECONNECTING */]: "RECONNECTING" /* RECONNECTING */,
+            ["reset" /* RESET */]: "IDLE" /* IDLE */
           }
         },
         ["ERROR" /* ERROR */]: {
-          on: { ["RESET" /* RESET */]: "IDLE" /* IDLE */ }
+          on: { ["reset" /* RESET */]: "IDLE" /* IDLE */ }
         }
       }
     });
-    this.#setupDeviceChangeListener();
   }
   // --- Public API ---
+  /** Returns the current state of the WebRTC connection. */
   get state() {
     return this.#fsm.state;
   }
+  /** Returns a readonly map of all active data channels indexed by label. */
+  get dataChannels() {
+    return this.#dataChannels;
+  }
+  /** Returns the local media stream, or null if not initialized. */
+  get localStream() {
+    return this.#localStream;
+  }
+  /** Returns the remote media stream, or null if not connected. */
+  get remoteStream() {
+    return this.#remoteStream;
+  }
+  /** Returns the underlying RTCPeerConnection, or null if not initialized. */
+  get peerConnection() {
+    return this.#pc;
+  }
+  /** Returns a Mermaid diagram representation of the FSM state machine. */
+  toMermaid() {
+    return this.#fsm.toMermaid();
+  }
+  /**
+   * Subscribe to a specific WebRTC event.
+   * @returns Unsubscribe function to remove the event listener.
+   */
   on(event, handler) {
     return this.#pubsub.subscribe(event, handler);
   }
+  /**
+   * Subscribe to all WebRTC events using a wildcard listener.
+   * @returns Unsubscribe function to remove the event listener.
+   */
   subscribe(handler) {
     return this.#pubsub.subscribe("*", handler);
   }
+  /**
+   * Retrieves all available audio input devices.
+   * @returns Array of audio input devices, or empty array on error.
+   */
   async getAudioInputDevices() {
     try {
       const devices = await this.#factory.enumerateDevices();
@@ -336,6 +368,11 @@ var WebRtcManager = class {
       return [];
     }
   }
+  /**
+   * Switches the active microphone to a different audio input device.
+   * @param deviceId - The device ID of the audio input to switch to.
+   * @returns True if the switch was successful, false otherwise.
+   */
   async switchMicrophone(deviceId) {
     if (!this.#pc || !this.#localStream) {
       console.error(
@@ -352,9 +389,18 @@ var WebRtcManager = class {
       if (!newTrack) {
         throw new Error("No audio track in new stream");
       }
-      const sender = this.#pc.getSenders().find((s) => s.track?.kind === "audio");
+      let sender = this.#pc.getSenders().find((s) => s.track?.kind === "audio");
       if (!sender) {
-        throw new Error("No audio sender found");
+        const transceivers = this.#pc.getTransceivers();
+        const audioTransceiver = transceivers.find(
+          (t) => t.receiver.track.kind === "audio"
+        );
+        if (audioTransceiver) {
+          sender = audioTransceiver.sender;
+        }
+      }
+      if (!sender) {
+        throw new Error("No audio sender found - enable microphone first");
       }
       await sender.replaceTrack(newTrack);
       this.#localStream.getAudioTracks().forEach((track) => track.stop());
@@ -367,15 +413,25 @@ var WebRtcManager = class {
       return false;
     }
   }
+  /**
+   * Initializes the WebRTC peer connection and sets up media tracks.
+   * Must be called before creating offers or answers. Can only be called from IDLE state.
+   */
   async initialize() {
     if (this.state !== "IDLE" /* IDLE */)
       return;
-    this.#dispatch("INIT" /* INIT */);
+    this.#dispatch("initialize" /* INIT */);
     try {
       this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
       this.#setupPcListeners();
+      this.#setupDeviceChangeListener();
       if (this.#config.enableMicrophone) {
-        await this.enableMicrophone(true);
+        const success = await this.enableMicrophone(true);
+        if (!success) {
+          this.#pubsub.publish("microphone_failed", {
+            reason: "Failed to enable microphone during initialization"
+          });
+        }
       } else {
         this.#pc.addTransceiver("audio", { direction: "recvonly" });
       }
@@ -386,24 +442,33 @@ var WebRtcManager = class {
       this.#error(e);
     }
   }
+  /**
+   * Transitions to the CONNECTING state. Automatically initializes if needed.
+   * If disconnected, reinitializes the peer connection.
+   */
   async connect() {
     if (this.state === "IDLE" /* IDLE */) {
       await this.initialize();
     }
     if (this.state === "DISCONNECTED" /* DISCONNECTED */) {
       this.#cleanup();
-      this.#fsm.transition("RESET" /* RESET */);
+      this.#fsm.transition("reset" /* RESET */);
       await this.initialize();
       return;
     }
     if (this.state === "CONNECTED" /* CONNECTED */ || this.state === "CONNECTING" /* CONNECTING */)
       return;
-    this.#dispatch("CONNECT" /* CONNECT */);
+    this.#dispatch("connect" /* CONNECT */);
   }
+  /**
+   * Enables or disables the microphone and adds/removes audio tracks to the peer connection.
+   * @param enable - True to enable microphone, false to disable.
+   * @returns True if successful, false if failed to get user media.
+   */
   async enableMicrophone(enable) {
     if (enable) {
       if (this.#localStream)
-        return;
+        return true;
       try {
         const stream = await this.#factory.getUserMedia({
           audio: true,
@@ -412,16 +477,29 @@ var WebRtcManager = class {
         this.#localStream = stream;
         this.#pubsub.publish("local_stream", stream);
         if (this.#pc) {
-          stream.getTracks().forEach((track) => {
-            this.#pc.addTrack(track, stream);
-          });
+          const transceivers = this.#pc.getTransceivers();
+          const audioTransceiver = transceivers.find(
+            (t) => t.receiver.track.kind === "audio"
+          );
+          if (audioTransceiver && audioTransceiver.sender) {
+            const track = stream.getAudioTracks()[0];
+            await audioTransceiver.sender.replaceTrack(track);
+            audioTransceiver.direction = "sendrecv";
+          } else {
+            stream.getTracks().forEach((track) => {
+              this.#pc.addTrack(track, stream);
+            });
+          }
         }
+        return true;
       } catch (e) {
         console.error("Failed to get user media", e);
+        this.#pubsub.publish("microphone_failed", { error: e });
+        return false;
       }
     } else {
       if (!this.#localStream)
-        return;
+        return true;
       this.#localStream.getTracks().forEach((track) => {
         track.stop();
         if (this.#pc) {
@@ -434,18 +512,39 @@ var WebRtcManager = class {
       });
       this.#localStream = null;
       this.#pubsub.publish("local_stream", null);
+      return true;
     }
   }
+  /**
+   * Disconnects the peer connection and cleans up all resources.
+   * Transitions to DISCONNECTED state.
+   */
   disconnect() {
     this.#cleanup();
-    this.#dispatch("DISCONNECT" /* DISCONNECT */);
+    this.#dispatch("disconnect" /* DISCONNECT */);
   }
+  /**
+   * Resets the manager to IDLE state from any state.
+   * Cleans up all resources and allows reinitialization.
+   */
   reset() {
     this.#cleanup();
-    if (this.state === "DISCONNECTED" /* DISCONNECTED */ || this.state === "ERROR" /* ERROR */) {
-      this.#dispatch("RESET" /* RESET */);
+    if (this.state !== "IDLE" /* IDLE */) {
+      if (this.state === "ERROR" /* ERROR */ || this.state === "DISCONNECTED" /* DISCONNECTED */ || this.state === "RECONNECTING" /* RECONNECTING */) {
+        this.#dispatch("reset" /* RESET */);
+      } else {
+        this.#dispatch("disconnect" /* DISCONNECT */);
+        this.#dispatch("reset" /* RESET */);
+      }
     }
   }
+  /**
+   * Creates a new data channel with the specified label.
+   * Returns existing channel if one with the same label already exists.
+   * @param label - The label for the data channel.
+   * @param options - Optional RTCDataChannelInit configuration.
+   * @returns The created data channel, or null if peer connection not initialized.
+   */
   createDataChannel(label, options) {
     if (!this.#pc)
       return null;
@@ -461,7 +560,47 @@ var WebRtcManager = class {
       return null;
     }
   }
+  /**
+   * Retrieves an existing data channel by label.
+   * @param label - The label of the data channel to retrieve.
+   * @returns The data channel if found, undefined otherwise.
+   */
+  getDataChannel(label) {
+    return this.#dataChannels.get(label);
+  }
+  /**
+   * Sends data through a data channel identified by label.
+   * Checks that the channel exists and is in open state before sending.
+   * @param label - The label of the data channel to send through.
+   * @param data - The data to send (string, Blob, or ArrayBuffer).
+   * @returns True if data was sent successfully, false otherwise.
+   */
+  sendData(label, data) {
+    const channel = this.#dataChannels.get(label);
+    if (!channel) {
+      this.#debug(`Data channel '${label}' not found`);
+      return false;
+    }
+    if (channel.readyState !== "open") {
+      this.#debug(
+        `Data channel '${label}' is not open (state: ${channel.readyState})`
+      );
+      return false;
+    }
+    try {
+      channel.send(data);
+      return true;
+    } catch (e) {
+      this.#error(e);
+      return false;
+    }
+  }
   // --- Signaling methods ---
+  /**
+   * Creates an SDP offer for initiating a WebRTC connection.
+   * @param options - Optional offer configuration.
+   * @returns The offer SDP, or null if peer connection not initialized.
+   */
   async createOffer(options) {
     if (!this.#pc)
       return null;
@@ -473,6 +612,11 @@ var WebRtcManager = class {
       return null;
     }
   }
+  /**
+   * Creates an SDP answer in response to a received offer.
+   * @param options - Optional answer configuration.
+   * @returns The answer SDP, or null if peer connection not initialized.
+   */
   async createAnswer(options) {
     if (!this.#pc)
       return null;
@@ -484,6 +628,11 @@ var WebRtcManager = class {
       return null;
     }
   }
+  /**
+   * Sets the local description for the peer connection.
+   * @param description - The SDP description (offer or answer).
+   * @returns True if successful, false otherwise.
+   */
   async setLocalDescription(description) {
     if (!this.#pc)
       return false;
@@ -495,6 +644,11 @@ var WebRtcManager = class {
       return false;
     }
   }
+  /**
+   * Sets the remote description received from the peer.
+   * @param description - The remote SDP description.
+   * @returns True if successful, false otherwise.
+   */
   async setRemoteDescription(description) {
     if (!this.#pc)
       return false;
@@ -506,6 +660,11 @@ var WebRtcManager = class {
       return false;
     }
   }
+  /**
+   * Adds an ICE candidate received from the remote peer.
+   * @param candidate - The ICE candidate to add, or null for end-of-candidates.
+   * @returns True if successful, false otherwise.
+   */
   async addIceCandidate(candidate) {
     if (!this.#pc)
       return false;
@@ -519,6 +678,11 @@ var WebRtcManager = class {
       return false;
     }
   }
+  /**
+   * Performs an ICE restart to recover from connection issues.
+   * Creates a new offer with iceRestart flag and sets it as local description.
+   * @returns True if successful, false otherwise.
+   */
   async iceRestart() {
     if (!this.#pc)
       return false;
@@ -531,6 +695,34 @@ var WebRtcManager = class {
       return false;
     }
   }
+  /**
+   * Returns the current local session description.
+   * @returns The local description, or null if not set.
+   */
+  getLocalDescription() {
+    return this.#pc?.localDescription ?? null;
+  }
+  /**
+   * Returns the current remote session description.
+   * @returns The remote description, or null if not set.
+   */
+  getRemoteDescription() {
+    return this.#pc?.remoteDescription ?? null;
+  }
+  /**
+   * Retrieves WebRTC statistics for the peer connection.
+   * @returns Stats report, or null if peer connection not initialized.
+   */
+  async getStats() {
+    if (!this.#pc)
+      return null;
+    try {
+      return await this.#pc.getStats();
+    } catch (e) {
+      this.#error(e);
+      return null;
+    }
+  }
   // --- Private ---
   #dispatch(event) {
     const oldState = this.#fsm.state;
@@ -540,9 +732,14 @@ var WebRtcManager = class {
       this.#pubsub.publish("state_change", newState);
     }
   }
+  #debug(...args) {
+    if (this.#config.debug) {
+      console.debug("[WebRtcManager]", ...args);
+    }
+  }
   #error(error) {
     console.error(error);
-    this.#dispatch("ERROR" /* ERROR */);
+    this.#dispatch("error" /* ERROR */);
     this.#pubsub.publish("error", error);
   }
   #setupPcListeners() {
@@ -552,11 +749,11 @@ var WebRtcManager = class {
       const state = this.#pc.connectionState;
       if (state === "connected") {
         this.#reconnectAttempts = 0;
-        this.#dispatch("CONNECTED" /* CONNECTED */);
+        this.#dispatch("connected" /* CONNECTED */);
       } else if (state === "failed") {
         this.#handleConnectionFailure();
       } else if (state === "disconnected" || state === "closed") {
-        this.#dispatch("DISCONNECT" /* DISCONNECT */);
+        this.#dispatch("disconnect" /* DISCONNECT */);
       }
     };
     this.#pc.ontrack = (event) => {
@@ -603,7 +800,7 @@ var WebRtcManager = class {
     this.#remoteStream = null;
   }
   #handleConnectionFailure() {
-    this.#dispatch("DISCONNECT" /* DISCONNECT */);
+    this.#dispatch("disconnect" /* DISCONNECT */);
     if (!this.#config.autoReconnect) {
       return;
     }
@@ -614,7 +811,7 @@ var WebRtcManager = class {
       });
       return;
     }
-    this.#dispatch("RECONNECTING" /* RECONNECTING */);
+    this.#dispatch("reconnecting" /* RECONNECTING */);
     this.#attemptReconnect();
   }
   #attemptReconnect() {
@@ -645,6 +842,9 @@ var WebRtcManager = class {
   }
   #setupDeviceChangeListener() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+      return;
+    }
+    if (this.#deviceChangeHandler) {
       return;
     }
     this.#deviceChangeHandler = async () => {
