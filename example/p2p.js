@@ -254,9 +254,9 @@ var FSM = class {
   }
 };
 
-// src/webrtc_manager.ts
+// src/webrtc-manager.ts
 var WebRtcManager = class {
-  fsm;
+  #fsm;
   #pubsub;
   #pc = null;
   #factory;
@@ -266,11 +266,12 @@ var WebRtcManager = class {
   #dataChannels = /* @__PURE__ */ new Map();
   #reconnectAttempts = 0;
   #reconnectTimer = null;
+  #deviceChangeHandler = null;
   constructor(factory2, config = {}) {
     this.#factory = factory2;
     this.#config = config;
     this.#pubsub = new PubSub();
-    this.fsm = new FSM({
+    this.#fsm = new FSM({
       initial: "IDLE" /* IDLE */,
       states: {
         ["IDLE" /* IDLE */]: {
@@ -314,16 +315,57 @@ var WebRtcManager = class {
         }
       }
     });
+    this.#setupDeviceChangeListener();
   }
   // --- Public API ---
   get state() {
-    return this.fsm.state;
+    return this.#fsm.state;
   }
   on(event, handler) {
     return this.#pubsub.subscribe(event, handler);
   }
   subscribe(handler) {
-    return this.#pubsub.subscribe("change", handler);
+    return this.#pubsub.subscribe("*", handler);
+  }
+  async getAudioInputDevices() {
+    try {
+      const devices = await this.#factory.enumerateDevices();
+      return devices.filter((d) => d.kind === "audioinput");
+    } catch (e) {
+      console.error("Failed to enumerate devices:", e);
+      return [];
+    }
+  }
+  async switchMicrophone(deviceId) {
+    if (!this.#pc || !this.#localStream) {
+      console.error(
+        "Cannot switch microphone: not initialized or no active stream"
+      );
+      return false;
+    }
+    try {
+      const newStream = await this.#factory.getUserMedia({
+        audio: { deviceId: { exact: deviceId } },
+        video: false
+      });
+      const newTrack = newStream.getAudioTracks()[0];
+      if (!newTrack) {
+        throw new Error("No audio track in new stream");
+      }
+      const sender = this.#pc.getSenders().find((s) => s.track?.kind === "audio");
+      if (!sender) {
+        throw new Error("No audio sender found");
+      }
+      await sender.replaceTrack(newTrack);
+      this.#localStream.getAudioTracks().forEach((track) => track.stop());
+      this.#localStream = newStream;
+      this.#pubsub.publish("local_stream", newStream);
+      return true;
+    } catch (e) {
+      console.error("Failed to switch microphone:", e);
+      this.#error(e);
+      return false;
+    }
   }
   async initialize() {
     if (this.state !== "IDLE" /* IDLE */)
@@ -332,11 +374,10 @@ var WebRtcManager = class {
     try {
       this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
       this.#setupPcListeners();
-      if (!this.#config.enableMicrophone) {
-        this.#pc.addTransceiver("audio", { direction: "recvonly" });
-      }
       if (this.#config.enableMicrophone) {
         await this.enableMicrophone(true);
+      } else {
+        this.#pc.addTransceiver("audio", { direction: "recvonly" });
       }
       if (this.#config.dataChannelLabel) {
         this.createDataChannel(this.#config.dataChannelLabel);
@@ -351,7 +392,7 @@ var WebRtcManager = class {
     }
     if (this.state === "DISCONNECTED" /* DISCONNECTED */) {
       this.#cleanup();
-      this.fsm.transition("RESET" /* RESET */);
+      this.#fsm.transition("RESET" /* RESET */);
       await this.initialize();
       return;
     }
@@ -492,9 +533,9 @@ var WebRtcManager = class {
   }
   // --- Private ---
   #dispatch(event) {
-    const oldState = this.fsm.state;
-    this.fsm.transition(event);
-    const newState = this.fsm.state;
+    const oldState = this.#fsm.state;
+    this.#fsm.transition(event);
+    const newState = this.#fsm.state;
     if (oldState !== newState) {
       this.#pubsub.publish("state_change", newState);
     }
@@ -537,6 +578,13 @@ var WebRtcManager = class {
     if (this.#reconnectTimer !== null) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
+    }
+    if (this.#deviceChangeHandler) {
+      navigator.mediaDevices.removeEventListener(
+        "devicechange",
+        this.#deviceChangeHandler
+      );
+      this.#deviceChangeHandler = null;
     }
     this.#dataChannels.forEach((dc) => {
       if (dc.readyState !== "closed") {
@@ -595,6 +643,23 @@ var WebRtcManager = class {
       }
     }, delay);
   }
+  #setupDeviceChangeListener() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+      return;
+    }
+    this.#deviceChangeHandler = async () => {
+      try {
+        const devices = await this.getAudioInputDevices();
+        this.#pubsub.publish("device_changed", devices);
+      } catch (e) {
+        console.error("Error handling device change:", e);
+      }
+    };
+    navigator.mediaDevices.addEventListener(
+      "devicechange",
+      this.#deviceChangeHandler
+    );
+  }
   #setupDataChannelListeners(dc) {
     dc.onopen = () => {
       this.#pubsub.publish("data_channel_open", dc);
@@ -624,6 +689,9 @@ var BrowserWebRtcFactory = class {
   getUserMedia(constraints) {
     return navigator.mediaDevices.getUserMedia(constraints);
   }
+  enumerateDevices() {
+    return navigator.mediaDevices.enumerateDevices();
+  }
 };
 var SIGNALING_KEY_OFFER = "webrtc_offer";
 var SIGNALING_KEY_ANSWER = "webrtc_answer";
@@ -643,7 +711,9 @@ var chat1 = document.getElementById("chat1");
 var input1 = document.getElementById("input1");
 var btnInit1 = document.getElementById("btn1-init");
 var btnOffer1 = document.getElementById("btn1-offer");
-var btnDisconnect1 = document.getElementById("btn1-disconnect");
+var btnDisconnect1 = document.getElementById(
+  "btn1-disconnect"
+);
 var btnSend1 = document.getElementById("btn1-send");
 var status2 = document.getElementById("status2");
 var logs2 = document.getElementById("logs2");
@@ -651,7 +721,9 @@ var chat2 = document.getElementById("chat2");
 var input2 = document.getElementById("input2");
 var btnInit2 = document.getElementById("btn2-init");
 var btnAnswer2 = document.getElementById("btn2-answer");
-var btnDisconnect2 = document.getElementById("btn2-disconnect");
+var btnDisconnect2 = document.getElementById(
+  "btn2-disconnect"
+);
 var btnSend2 = document.getElementById("btn2-send");
 function log(peer, msg) {
   const logsEl = peer === 1 ? logs1 : logs2;
@@ -701,7 +773,9 @@ peer1.on("data_channel_message", ({ data }) => {
 peer1.on("ice_candidate", (candidate) => {
   if (candidate) {
     log(1, "Got ICE candidate");
-    const existing = JSON.parse(localStorage.getItem(SIGNALING_KEY_ICE_1) || "[]");
+    const existing = JSON.parse(
+      localStorage.getItem(SIGNALING_KEY_ICE_1) || "[]"
+    );
     existing.push(candidate.toJSON());
     localStorage.setItem(SIGNALING_KEY_ICE_1, JSON.stringify(existing));
   }
@@ -721,7 +795,9 @@ peer2.on("data_channel_message", ({ data }) => {
 peer2.on("ice_candidate", (candidate) => {
   if (candidate) {
     log(2, "Got ICE candidate");
-    const existing = JSON.parse(localStorage.getItem(SIGNALING_KEY_ICE_2) || "[]");
+    const existing = JSON.parse(
+      localStorage.getItem(SIGNALING_KEY_ICE_2) || "[]"
+    );
     existing.push(candidate.toJSON());
     localStorage.setItem(SIGNALING_KEY_ICE_2, JSON.stringify(existing));
   }
@@ -786,7 +862,9 @@ btnAnswer2.onclick = async () => {
       if (answerStr) {
         log(1, "Setting remote description (answer)...");
         await peer1.setRemoteDescription(JSON.parse(answerStr));
-        const ice2 = JSON.parse(localStorage.getItem(SIGNALING_KEY_ICE_2) || "[]");
+        const ice2 = JSON.parse(
+          localStorage.getItem(SIGNALING_KEY_ICE_2) || "[]"
+        );
         for (const candidate of ice2) {
           await peer1.addIceCandidate(candidate);
         }

@@ -1,15 +1,15 @@
 import { FSM } from "@marianmeres/fsm";
 import { PubSub } from "@marianmeres/pubsub";
 import {
-	WebRtcFactory,
-	WebRtcManagerConfig,
+	type WebRtcFactory,
+	type WebRtcManagerConfig,
 	WebRtcState,
 	WebRtcFsmEvent,
-	WebRtcEvents,
+	type WebRtcEvents,
 } from "./types.ts";
 
 export class WebRtcManager {
-	fsm: FSM<any, any>;
+	#fsm: FSM<any, any>;
 	#pubsub: PubSub;
 	#pc: RTCPeerConnection | null = null;
 	#factory: WebRtcFactory;
@@ -19,6 +19,7 @@ export class WebRtcManager {
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
 	#reconnectAttempts: number = 0;
 	#reconnectTimer: number | null = null;
+	#deviceChangeHandler: (() => void) | null = null;
 
 	constructor(factory: WebRtcFactory, config: WebRtcManagerConfig = {}) {
 		this.#factory = factory;
@@ -26,7 +27,7 @@ export class WebRtcManager {
 		this.#pubsub = new PubSub();
 
 		// Initialize FSM
-		this.fsm = new FSM({
+		this.#fsm = new FSM({
 			initial: WebRtcState.IDLE,
 			states: {
 				[WebRtcState.IDLE]: {
@@ -70,12 +71,19 @@ export class WebRtcManager {
 				},
 			},
 		});
+
+		// Setup device change detection
+		this.#setupDeviceChangeListener();
 	}
 
 	// --- Public API ---
 
 	get state(): WebRtcState {
-		return this.fsm.state as WebRtcState;
+		return this.#fsm.state as WebRtcState;
+	}
+
+	toMermaid() {
+		return this.#fsm.toMermaid();
 	}
 
 	on(event: keyof WebRtcEvents, handler: (data: any) => void) {
@@ -83,7 +91,63 @@ export class WebRtcManager {
 	}
 
 	subscribe(handler: (data: any) => void) {
-		return this.#pubsub.subscribe("change", handler);
+		return this.#pubsub.subscribe("*", handler);
+	}
+
+	async getAudioInputDevices(): Promise<MediaDeviceInfo[]> {
+		try {
+			const devices = await this.#factory.enumerateDevices();
+			return devices.filter((d) => d.kind === "audioinput");
+		} catch (e) {
+			console.error("Failed to enumerate devices:", e);
+			return [];
+		}
+	}
+
+	async switchMicrophone(deviceId: string): Promise<boolean> {
+		if (!this.#pc || !this.#localStream) {
+			console.error(
+				"Cannot switch microphone: not initialized or no active stream"
+			);
+			return false;
+		}
+
+		try {
+			// Get new stream from the specified device
+			const newStream = await this.#factory.getUserMedia({
+				audio: { deviceId: { exact: deviceId } },
+				video: false,
+			});
+
+			const newTrack = newStream.getAudioTracks()[0];
+			if (!newTrack) {
+				throw new Error("No audio track in new stream");
+			}
+
+			// Find the sender for the audio track
+			const sender = this.#pc
+				.getSenders()
+				.find((s) => s.track?.kind === "audio");
+			if (!sender) {
+				throw new Error("No audio sender found");
+			}
+
+			// Replace the track
+			await sender.replaceTrack(newTrack);
+
+			// Stop old tracks
+			this.#localStream.getAudioTracks().forEach((track) => track.stop());
+
+			// Update local stream reference
+			this.#localStream = newStream;
+			this.#pubsub.publish("local_stream", newStream);
+
+			return true;
+		} catch (e) {
+			console.error("Failed to switch microphone:", e);
+			this.#error(e);
+			return false;
+		}
 	}
 
 	async initialize() {
@@ -94,14 +158,12 @@ export class WebRtcManager {
 			this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
 			this.#setupPcListeners();
 
-			// Always setup to receive audio, even if we don't enable microphone
-			// This ensures the SDP includes audio media line
-			if (!this.#config.enableMicrophone) {
-				this.#pc.addTransceiver('audio', { direction: 'recvonly' });
-			}
-
 			if (this.#config.enableMicrophone) {
 				await this.enableMicrophone(true);
+			} else {
+				// Always setup to receive audio, even if we don't enable microphone
+				// This ensures the SDP includes audio media line
+				this.#pc.addTransceiver("audio", { direction: "recvonly" });
 			}
 
 			if (this.#config.dataChannelLabel) {
@@ -123,7 +185,7 @@ export class WebRtcManager {
 			// Clean up old connection
 			this.#cleanup();
 			// Reset to IDLE and reinitialize
-			this.fsm.transition(WebRtcFsmEvent.RESET);
+			this.#fsm.transition(WebRtcFsmEvent.RESET);
 			await this.initialize();
 			// Stay in INITIALIZING state - caller needs to create offer/answer
 			return;
@@ -293,9 +355,9 @@ export class WebRtcManager {
 	// --- Private ---
 
 	#dispatch(event: WebRtcFsmEvent) {
-		const oldState = this.fsm.state;
-		this.fsm.transition(event);
-		const newState = this.fsm.state;
+		const oldState = this.#fsm.state;
+		this.#fsm.transition(event);
+		const newState = this.#fsm.state;
 
 		if (oldState !== newState) {
 			this.#pubsub.publish("state_change", newState);
@@ -348,6 +410,15 @@ export class WebRtcManager {
 		if (this.#reconnectTimer !== null) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = null;
+		}
+
+		// Remove device change listener
+		if (this.#deviceChangeHandler) {
+			navigator.mediaDevices.removeEventListener(
+				"devicechange",
+				this.#deviceChangeHandler
+			);
+			this.#deviceChangeHandler = null;
 		}
 
 		// Close all data channels
@@ -433,6 +504,27 @@ export class WebRtcManager {
 				}
 			}
 		}, delay) as unknown as number;
+	}
+
+	#setupDeviceChangeListener() {
+		// Only setup in browser environment with navigator.mediaDevices
+		if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+			return;
+		}
+
+		this.#deviceChangeHandler = async () => {
+			try {
+				const devices = await this.getAudioInputDevices();
+				this.#pubsub.publish("device_changed", devices);
+			} catch (e) {
+				console.error("Error handling device change:", e);
+			}
+		};
+
+		navigator.mediaDevices.addEventListener(
+			"devicechange",
+			this.#deviceChangeHandler
+		);
 	}
 
 	#setupDataChannelListeners(dc: RTCDataChannel) {

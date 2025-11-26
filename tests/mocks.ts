@@ -163,4 +163,13 @@ export class MockWebRtcFactory {
         }
         return Promise.resolve(new MockMediaStream(tracks) as unknown as MediaStream);
     }
+
+    enumerateDevices(): Promise<MediaDeviceInfo[]> {
+        // Mock device list
+        return Promise.resolve([
+            { deviceId: 'default', kind: 'audioinput', label: 'Default Microphone', groupId: '' } as MediaDeviceInfo,
+            { deviceId: 'mic1', kind: 'audioinput', label: 'Built-in Microphone', groupId: '' } as MediaDeviceInfo,
+            { deviceId: 'speaker1', kind: 'audiooutput', label: 'Built-in Speaker', groupId: '' } as MediaDeviceInfo,
+        ]);
+    }
 }

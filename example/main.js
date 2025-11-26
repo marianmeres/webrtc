@@ -254,9 +254,9 @@ var FSM = class {
   }
 };
 
-// src/webrtc_manager.ts
+// src/webrtc-manager.ts
 var WebRtcManager = class {
-  fsm;
+  #fsm;
   #pubsub;
   #pc = null;
   #factory;
@@ -266,11 +266,12 @@ var WebRtcManager = class {
   #dataChannels = /* @__PURE__ */ new Map();
   #reconnectAttempts = 0;
   #reconnectTimer = null;
+  #deviceChangeHandler = null;
   constructor(factory2, config = {}) {
     this.#factory = factory2;
     this.#config = config;
     this.#pubsub = new PubSub();
-    this.fsm = new FSM({
+    this.#fsm = new FSM({
       initial: "IDLE" /* IDLE */,
       states: {
         ["IDLE" /* IDLE */]: {
@@ -314,16 +315,57 @@ var WebRtcManager = class {
         }
       }
     });
+    this.#setupDeviceChangeListener();
   }
   // --- Public API ---
   get state() {
-    return this.fsm.state;
+    return this.#fsm.state;
   }
   on(event, handler) {
     return this.#pubsub.subscribe(event, handler);
   }
   subscribe(handler) {
-    return this.#pubsub.subscribe("change", handler);
+    return this.#pubsub.subscribe("*", handler);
+  }
+  async getAudioInputDevices() {
+    try {
+      const devices = await this.#factory.enumerateDevices();
+      return devices.filter((d) => d.kind === "audioinput");
+    } catch (e) {
+      console.error("Failed to enumerate devices:", e);
+      return [];
+    }
+  }
+  async switchMicrophone(deviceId) {
+    if (!this.#pc || !this.#localStream) {
+      console.error(
+        "Cannot switch microphone: not initialized or no active stream"
+      );
+      return false;
+    }
+    try {
+      const newStream = await this.#factory.getUserMedia({
+        audio: { deviceId: { exact: deviceId } },
+        video: false
+      });
+      const newTrack = newStream.getAudioTracks()[0];
+      if (!newTrack) {
+        throw new Error("No audio track in new stream");
+      }
+      const sender = this.#pc.getSenders().find((s) => s.track?.kind === "audio");
+      if (!sender) {
+        throw new Error("No audio sender found");
+      }
+      await sender.replaceTrack(newTrack);
+      this.#localStream.getAudioTracks().forEach((track) => track.stop());
+      this.#localStream = newStream;
+      this.#pubsub.publish("local_stream", newStream);
+      return true;
+    } catch (e) {
+      console.error("Failed to switch microphone:", e);
+      this.#error(e);
+      return false;
+    }
   }
   async initialize() {
     if (this.state !== "IDLE" /* IDLE */)
@@ -332,11 +374,10 @@ var WebRtcManager = class {
     try {
       this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
       this.#setupPcListeners();
-      if (!this.#config.enableMicrophone) {
-        this.#pc.addTransceiver("audio", { direction: "recvonly" });
-      }
       if (this.#config.enableMicrophone) {
         await this.enableMicrophone(true);
+      } else {
+        this.#pc.addTransceiver("audio", { direction: "recvonly" });
       }
       if (this.#config.dataChannelLabel) {
         this.createDataChannel(this.#config.dataChannelLabel);
@@ -351,7 +392,7 @@ var WebRtcManager = class {
     }
     if (this.state === "DISCONNECTED" /* DISCONNECTED */) {
       this.#cleanup();
-      this.fsm.transition("RESET" /* RESET */);
+      this.#fsm.transition("RESET" /* RESET */);
       await this.initialize();
       return;
     }
@@ -492,9 +533,9 @@ var WebRtcManager = class {
   }
   // --- Private ---
   #dispatch(event) {
-    const oldState = this.fsm.state;
-    this.fsm.transition(event);
-    const newState = this.fsm.state;
+    const oldState = this.#fsm.state;
+    this.#fsm.transition(event);
+    const newState = this.#fsm.state;
     if (oldState !== newState) {
       this.#pubsub.publish("state_change", newState);
     }
@@ -537,6 +578,13 @@ var WebRtcManager = class {
     if (this.#reconnectTimer !== null) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
+    }
+    if (this.#deviceChangeHandler) {
+      navigator.mediaDevices.removeEventListener(
+        "devicechange",
+        this.#deviceChangeHandler
+      );
+      this.#deviceChangeHandler = null;
     }
     this.#dataChannels.forEach((dc) => {
       if (dc.readyState !== "closed") {
@@ -595,6 +643,23 @@ var WebRtcManager = class {
       }
     }, delay);
   }
+  #setupDeviceChangeListener() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+      return;
+    }
+    this.#deviceChangeHandler = async () => {
+      try {
+        const devices = await this.getAudioInputDevices();
+        this.#pubsub.publish("device_changed", devices);
+      } catch (e) {
+        console.error("Error handling device change:", e);
+      }
+    };
+    navigator.mediaDevices.addEventListener(
+      "devicechange",
+      this.#deviceChangeHandler
+    );
+  }
   #setupDataChannelListeners(dc) {
     dc.onopen = () => {
       this.#pubsub.publish("data_channel_open", dc);
@@ -624,6 +689,9 @@ var BrowserWebRtcFactory = class {
   getUserMedia(constraints) {
     return navigator.mediaDevices.getUserMedia(constraints);
   }
+  enumerateDevices() {
+    return navigator.mediaDevices.enumerateDevices();
+  }
 };
 var factory = new BrowserWebRtcFactory();
 var manager = new WebRtcManager(factory, {
@@ -636,7 +704,9 @@ var statusEl = document.getElementById("status");
 var logsEl = document.getElementById("logs");
 var btnInit = document.getElementById("btn-init");
 var btnConnect = document.getElementById("btn-connect");
-var btnDisconnect = document.getElementById("btn-disconnect");
+var btnDisconnect = document.getElementById(
+  "btn-disconnect"
+);
 var btnMicOn = document.getElementById("btn-mic-on");
 var btnMicOff = document.getElementById("btn-mic-off");
 function log(msg, data) {
