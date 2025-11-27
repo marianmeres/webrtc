@@ -76,12 +76,14 @@ const packageJson = {
 	license: "MIT",
 	repository: {
 		type: "git",
-		url: "git+https://github.com/marianmeres/pubsub.git",
+		url: "git+https://github.com/marianmeres/webrtc.git",
 	},
 	bugs: {
-		url: "https://github.com/marianmeres/pubsub/issues",
+		url: "https://github.com/marianmeres/webrtc/issues",
 	},
 	dependencies: {
+		"@marianmeres/fsm": "^2.3.0",
+		"@marianmeres/pubsub": "^2.3.0",
 	}
 };
 Deno.writeTextFileSync(

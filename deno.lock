@@ -1,23 +1,23 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@marianmeres/fsm@^2.2.0": "2.2.0",
-    "jsr:@marianmeres/pubsub@^2.2.0": "2.3.0",
-    "jsr:@marianmeres/pubsub@^2.3.0": "2.3.0",
+    "jsr:@marianmeres/fsm@^2.3.0": "2.3.0",
+    "jsr:@marianmeres/pubsub@^2.2.0": "2.4.0",
+    "jsr:@marianmeres/pubsub@^2.4.0": "2.4.0",
     "jsr:@std/assert@^1.0.16": "1.0.16",
     "jsr:@std/fs@^1.0.20": "1.0.20",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@^1.1.3": "1.1.3"
   },
   "jsr": {
-    "@marianmeres/fsm@2.2.0": {
-      "integrity": "275f57e67074dd308da62b4b7b00e5a5dd2465f6a8220ae14a2fd33a7d190787",
+    "@marianmeres/fsm@2.3.0": {
+      "integrity": "a34cda94ade89ccd79cd8b88ffea1da8aeb1f36aa2ae99ec327b823c24cc82aa",
       "dependencies": [
         "jsr:@marianmeres/pubsub@^2.2.0"
       ]
     },
-    "@marianmeres/pubsub@2.3.0": {
-      "integrity": "eb1406c8b9820527f6048f19581d8fdcfd2371307821a07c58e7c18dae50679d"
+    "@marianmeres/pubsub@2.4.0": {
+      "integrity": "2c499dbed2242215ce1ae7f5a2ae892e2b8da4e922de86ff6b011613ee161626"
     },
     "@std/assert@1.0.16": {
       "integrity": "6a7272ed1eaa77defe76e5ff63ca705d9c495077e2d5fd0126d2b53fc5bd6532",
@@ -233,8 +233,8 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@marianmeres/fsm@^2.2.0",
-      "jsr:@marianmeres/pubsub@^2.3.0",
+      "jsr:@marianmeres/fsm@^2.3.0",
+      "jsr:@marianmeres/pubsub@^2.4.0",
       "jsr:@std/assert@^1.0.16",
       "jsr:@std/fs@^1.0.20",
       "jsr:@std/path@^1.1.3"

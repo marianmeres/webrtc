@@ -3,13 +3,14 @@ import { WebRtcManager } from "../src/webrtc-manager.ts";
 import { WebRtcState } from "../src/types.ts";
 import { MockWebRtcFactory } from "./mocks.ts";
 
-Deno.test("WebRtcManager - Initial State", () => {
+Deno.test("Initial State", () => {
 	const factory = new MockWebRtcFactory();
 	const manager = new WebRtcManager(factory);
 	assertEquals(manager.state, WebRtcState.IDLE);
+	// console.log(manager.toMermaid());
 });
 
-Deno.test("WebRtcManager - Initialize and Connect", async () => {
+Deno.test("Initialize and Connect", async () => {
 	const factory = new MockWebRtcFactory();
 	const manager = new WebRtcManager(factory);
 
@@ -26,7 +27,7 @@ Deno.test("WebRtcManager - Initialize and Connect", async () => {
 	assertEquals(manager.state, WebRtcState.CONNECTING);
 });
 
-Deno.test("WebRtcManager - Audio Handling", async () => {
+Deno.test("Audio Handling", async () => {
 	const factory = new MockWebRtcFactory();
 	const manager = new WebRtcManager(factory);
 
@@ -47,7 +48,7 @@ Deno.test("WebRtcManager - Audio Handling", async () => {
 	assertEquals(localStream, null);
 });
 
-Deno.test("WebRtcManager - PubSub Notifications", async () => {
+Deno.test("PubSub Notifications", async () => {
 	const factory = new MockWebRtcFactory();
 	const manager = new WebRtcManager(factory);
 
@@ -64,7 +65,7 @@ Deno.test("WebRtcManager - PubSub Notifications", async () => {
 	assertEquals(events.includes("stream:active"), true);
 });
 
-Deno.test("WebRtcManager - Data Channel", async () => {
+Deno.test("Data Channel", async () => {
 	const factory = new MockWebRtcFactory();
 	const manager = new WebRtcManager(factory, {
 		dataChannelLabel: "chat",

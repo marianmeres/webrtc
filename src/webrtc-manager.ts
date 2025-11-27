@@ -9,6 +9,20 @@ import {
 } from "./types.ts";
 
 export class WebRtcManager {
+	// Event name constants
+	static readonly EVENT_STATE_CHANGE = "state_change";
+	static readonly EVENT_LOCAL_STREAM = "local_stream";
+	static readonly EVENT_REMOTE_STREAM = "remote_stream";
+	static readonly EVENT_DATA_CHANNEL_OPEN = "data_channel_open";
+	static readonly EVENT_DATA_CHANNEL_MESSAGE = "data_channel_message";
+	static readonly EVENT_DATA_CHANNEL_CLOSE = "data_channel_close";
+	static readonly EVENT_ICE_CANDIDATE = "ice_candidate";
+	static readonly EVENT_RECONNECTING = "reconnecting";
+	static readonly EVENT_RECONNECT_FAILED = "reconnect_failed";
+	static readonly EVENT_DEVICE_CHANGED = "device_changed";
+	static readonly EVENT_MICROPHONE_FAILED = "microphone_failed";
+	static readonly EVENT_ERROR = "error";
+
 	#fsm: FSM<WebRtcState, WebRtcFsmEvent>;
 	#pubsub: PubSub;
 	#pc: RTCPeerConnection | null = null;
@@ -114,11 +128,56 @@ export class WebRtcManager {
 	}
 
 	/**
-	 * Subscribe to all WebRTC events using a wildcard listener.
+	 * Subscribe to the overall state of the WebRTC manager.
+	 * Compatible with Svelte stores - immediately calls handler with current state,
+	 * then notifies on any changes to state, streams, or data channels.
+	 * @param handler - Callback that receives the overall state object
 	 * @returns Unsubscribe function to remove the event listener.
 	 */
-	subscribe(handler: (data: any) => void): () => void {
-		return this.#pubsub.subscribe("*", handler);
+	subscribe(
+		handler: (state: {
+			state: WebRtcState;
+			localStream: MediaStream | null;
+			remoteStream: MediaStream | null;
+			dataChannels: ReadonlyMap<string, RTCDataChannel>;
+			peerConnection: RTCPeerConnection | null;
+		}) => void
+	): () => void {
+		// Helper to get current overall state
+		const getCurrentState = () => ({
+			state: this.state,
+			localStream: this.localStream,
+			remoteStream: this.remoteStream,
+			dataChannels: this.dataChannels,
+			peerConnection: this.peerConnection,
+		});
+
+		// Immediately call handler with current state (Svelte store compatibility)
+		handler(getCurrentState());
+
+		// Subscribe to relevant events that affect the overall state
+		const unsubscribers = [
+			this.#pubsub.subscribe(WebRtcManager.EVENT_STATE_CHANGE, () =>
+				handler(getCurrentState())
+			),
+			this.#pubsub.subscribe(WebRtcManager.EVENT_LOCAL_STREAM, () =>
+				handler(getCurrentState())
+			),
+			this.#pubsub.subscribe(WebRtcManager.EVENT_REMOTE_STREAM, () =>
+				handler(getCurrentState())
+			),
+			this.#pubsub.subscribe(WebRtcManager.EVENT_DATA_CHANNEL_OPEN, () =>
+				handler(getCurrentState())
+			),
+			this.#pubsub.subscribe(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, () =>
+				handler(getCurrentState())
+			),
+		];
+
+		// Return combined unsubscribe function
+		return () => {
+			unsubscribers.forEach((unsub) => unsub());
+		};
 	}
 
 	/**
@@ -186,7 +245,7 @@ export class WebRtcManager {
 
 			// Update local stream reference
 			this.#localStream = newStream;
-			this.#pubsub.publish("local_stream", newStream);
+			this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, newStream);
 
 			return true;
 		} catch (e) {
@@ -214,7 +273,7 @@ export class WebRtcManager {
 			if (this.#config.enableMicrophone) {
 				const success = await this.enableMicrophone(true);
 				if (!success) {
-					this.#pubsub.publish("microphone_failed", {
+					this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, {
 						reason: "Failed to enable microphone during initialization",
 					});
 				}
@@ -276,7 +335,7 @@ export class WebRtcManager {
 					video: false,
 				});
 				this.#localStream = stream;
-				this.#pubsub.publish("local_stream", stream);
+				this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, stream);
 
 				if (this.#pc) {
 					// Check if we have an existing audio transceiver
@@ -301,7 +360,7 @@ export class WebRtcManager {
 				return true;
 			} catch (e) {
 				console.error("Failed to get user media", e);
-				this.#pubsub.publish("microphone_failed", { error: e });
+				this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, { error: e });
 				return false;
 			}
 		} else {
@@ -318,7 +377,7 @@ export class WebRtcManager {
 				}
 			});
 			this.#localStream = null;
-			this.#pubsub.publish("local_stream", null);
+			this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, null);
 			return true;
 		}
 	}
@@ -570,7 +629,7 @@ export class WebRtcManager {
 		const newState = this.#fsm.state;
 
 		if (oldState !== newState) {
-			this.#pubsub.publish("state_change", newState);
+			this.#pubsub.publish(WebRtcManager.EVENT_STATE_CHANGE, newState);
 		}
 	}
 
@@ -583,7 +642,7 @@ export class WebRtcManager {
 	#error(error: any) {
 		console.error(error);
 		this.#dispatch(WebRtcFsmEvent.ERROR);
-		this.#pubsub.publish("error", error);
+		this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
 	}
 
 	#setupPcListeners() {
@@ -606,7 +665,7 @@ export class WebRtcManager {
 		this.#pc.ontrack = (event) => {
 			if (event.streams && event.streams[0]) {
 				this.#remoteStream = event.streams[0];
-				this.#pubsub.publish("remote_stream", this.#remoteStream);
+				this.#pubsub.publish(WebRtcManager.EVENT_REMOTE_STREAM, this.#remoteStream);
 			}
 		};
 
@@ -617,7 +676,7 @@ export class WebRtcManager {
 		};
 
 		this.#pc.onicecandidate = (event) => {
-			this.#pubsub.publish("ice_candidate", event.candidate);
+			this.#pubsub.publish(WebRtcManager.EVENT_ICE_CANDIDATE, event.candidate);
 		};
 	}
 
@@ -672,7 +731,7 @@ export class WebRtcManager {
 
 		// Check if we've exceeded max attempts
 		if (this.#reconnectAttempts >= maxAttempts) {
-			this.#pubsub.publish("reconnect_failed", {
+			this.#pubsub.publish(WebRtcManager.EVENT_RECONNECT_FAILED, {
 				attempts: this.#reconnectAttempts,
 			});
 			return;
@@ -693,7 +752,7 @@ export class WebRtcManager {
 		// Try ICE restart first (attempts 1-2), then full reconnect
 		const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
 
-		this.#pubsub.publish("reconnecting", {
+		this.#pubsub.publish(WebRtcManager.EVENT_RECONNECTING, {
 			attempt: this.#reconnectAttempts,
 			strategy,
 		});
@@ -740,7 +799,7 @@ export class WebRtcManager {
 		this.#deviceChangeHandler = async () => {
 			try {
 				const devices = await this.getAudioInputDevices();
-				this.#pubsub.publish("device_changed", devices);
+				this.#pubsub.publish(WebRtcManager.EVENT_DEVICE_CHANGED, devices);
 			} catch (e) {
 				console.error("Error handling device change:", e);
 			}
@@ -754,21 +813,21 @@ export class WebRtcManager {
 
 	#setupDataChannelListeners(dc: RTCDataChannel) {
 		dc.onopen = () => {
-			this.#pubsub.publish("data_channel_open", dc);
+			this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_OPEN, dc);
 		};
 		dc.onmessage = (event) => {
-			this.#pubsub.publish("data_channel_message", {
+			this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_MESSAGE, {
 				channel: dc,
 				data: event.data,
 			});
 		};
 		dc.onclose = () => {
-			this.#pubsub.publish("data_channel_close", dc);
+			this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, dc);
 			this.#dataChannels.delete(dc.label);
 		};
 		dc.onerror = (error) => {
 			console.error("Data Channel Error:", error);
-			this.#pubsub.publish("error", error);
+			this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
 		};
 	}
 }
