@@ -2,11 +2,13 @@
 
 import { join } from "@std/path";
 
-const PORT = 8001;
+const PORT = 9001;
 const PROJECT_ROOT = Deno.cwd();
 
 console.log(`Starting browser test server on http://localhost:${PORT}`);
-console.log(`Open http://localhost:${PORT}/tests/browser/test-runner.html in your browser`);
+console.log(
+	`Open http://localhost:${PORT}/tests/browser/test-runner.html in your browser`
+);
 
 Deno.serve({
 	port: PORT,
@@ -18,7 +20,6 @@ Deno.serve({
 		if (filePath === "/") {
 			filePath = "/tests/browser/test-runner.html";
 		}
-
 
 		// Remove leading slash and resolve from project root
 		const fsPath = join(PROJECT_ROOT, filePath.slice(1));

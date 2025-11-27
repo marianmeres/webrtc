@@ -489,14 +489,8 @@ const tests = [
 				});
 
 				// Verify handlers return unsubscribe functions
-				assert(
-					typeof unsubReconnecting === "function",
-					"Should return unsubscribe function"
-				);
-				assert(
-					typeof unsubFailed === "function",
-					"Should return unsubscribe function"
-				);
+				assert(typeof unsubReconnecting === "function", "Should return unsubscribe function");
+				assert(typeof unsubFailed === "function", "Should return unsubscribe function");
 
 				// Unsubscribe
 				unsubReconnecting();
@@ -550,61 +544,70 @@ const tests = [
 	},
 
 	{
-		name: "Data channel works after manual reconnection",
+		name: "Reconnection preserves data channel functionality",
 		run: async () => {
-			// First connection
-			let peer1 = new WebRtcManager(new BrowserWebRtcFactory(), {
-				dataChannelLabel: "test",
+			const peer1 = new WebRtcManager(new BrowserWebRtcFactory(), {
+				dataChannelLabel: "persistent",
 			});
-			let peer2 = new WebRtcManager(new BrowserWebRtcFactory());
+			const peer2 = new WebRtcManager(new BrowserWebRtcFactory());
 
 			try {
+				// Setup message tracking for peer2
 				const messages: string[] = [];
 				peer2.on("data_channel_message", ({ data }) => {
 					messages.push(data);
 				});
 
-				// Setup and test first connection
+				// Setup initial connection
 				await setupPeerConnection(peer1, peer2);
+				// Wait for both peers' data channels to open
 				await Promise.all([
 					waitForEvent(peer1, "data_channel_open"),
 					waitForEvent(peer2, "data_channel_open"),
 				]);
 
-				peer1.sendData("test", "First connection");
+				// Send initial message to verify channel works
+				peer1.sendData("persistent", "Before reconnect");
 				await new Promise((resolve) => setTimeout(resolve, 200));
-				assert(messages.length === 1, "Should receive first message");
 
-				// Clean up first connection
+				// Verify first message received
+				assert(messages.length === 1, "Should receive first message");
+				assertEquals(messages[0], "Before reconnect");
+
+				// Disconnect and reset
 				peer1.disconnect();
 				peer2.disconnect();
+				await Promise.all([
+					waitForState(peer1, WebRtcState.DISCONNECTED),
+					waitForState(peer2, WebRtcState.DISCONNECTED),
+				]);
+
 				peer1.reset();
 				peer2.reset();
+				messages.length = 0; // Clear messages
 
-				// Create completely new instances for reconnection
-				peer1 = new WebRtcManager(new BrowserWebRtcFactory(), {
-					dataChannelLabel: "test",
-				});
-				peer2 = new WebRtcManager(new BrowserWebRtcFactory());
-
-				messages.length = 0;
+				// Re-setup message handler after reset
 				peer2.on("data_channel_message", ({ data }) => {
 					messages.push(data);
 				});
 
-				// Setup and test second connection
+				// Re-establish connection
 				await setupPeerConnection(peer1, peer2);
+				// Wait for both peers' data channels to open again
 				await Promise.all([
 					waitForEvent(peer1, "data_channel_open"),
 					waitForEvent(peer2, "data_channel_open"),
 				]);
 
-				const sent = peer1.sendData("test", "Second connection");
-				assert(sent, "Should successfully send on new connection");
+				// Send message after reconnect
+				const sent = peer1.sendData("persistent", "After reconnect");
+				assert(sent, "Should successfully send message");
 
 				await new Promise((resolve) => setTimeout(resolve, 300));
-				assert(messages.length === 1, "Should receive second message");
-				assertEquals(messages[0], "Second connection");
+
+				// Verify message was received after reconnect
+				assert(messages.length > 0, "Should receive message after reconnect");
+				assertEquals(messages[0], "After reconnect");
 			} finally {
 				peer1.reset();
 				peer2.reset();
@@ -668,12 +671,13 @@ export async function runBrowserTests(
 		try {
 			await test.run();
 			results[i].status = "pass";
+			results[i].duration = Math.round(performance.now() - startTime);
 		} catch (error) {
 			results[i].status = "fail";
 			results[i].error = error instanceof Error ? error.message : String(error);
+			results[i].duration = Math.round(performance.now() - startTime);
 		}
 
-		results[i].duration = Math.round(performance.now() - startTime);
 		onUpdate([...results]);
 	}
 }
