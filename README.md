@@ -19,9 +19,6 @@ A lightweight, framework-agnostic WebRTC manager with state machine-based lifecy
 ```bash
 npm install @marianmeres/webrtc
 ```
-```sh
-deno add jsr:@marianmeres/webrtc
-```
 
 ## High-Level Overview
 
