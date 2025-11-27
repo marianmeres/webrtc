@@ -2,3 +2,7 @@ node_modules
 .npm-dist
 .idea
 .DS_Store
+
+# Browser test build artifacts
+tests/browser/*.js
+tests/browser/*.js.map

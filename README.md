@@ -375,6 +375,37 @@ The manager uses a finite state machine with the following states:
 
 ![State Diagram](states.png "State Diagram")
 
+## Testing
+
+The project includes two types of tests:
+
+### Unit Tests (Deno)
+
+Mock-based tests for the manager's logic and state transitions:
+
+```bash
+deno task test
+```
+
+### Browser Integration Tests
+
+Real peer-to-peer connection tests running in a browser environment:
+
+```bash
+deno task test:browser
+```
+
+This builds the test bundle and starts a local server. Open the provided URL in your browser to run the tests interactively.
+
+The browser tests verify:
+- Actual P2P connections between peers
+- Data channel message exchange
+- ICE candidate exchange
+- Connection state transitions
+- Resource cleanup
+
+See [tests/browser/README.md](tests/browser/README.md) for more details.
+
 ## License
 
 MIT

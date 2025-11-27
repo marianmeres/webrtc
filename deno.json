@@ -5,6 +5,7 @@
 	"tasks": {
 		"dev": "deno run --watch main.ts",
 		"test": "deno test --watch",
+		"test:browser": "deno run -A scripts/build-browser-tests.ts && deno run -A scripts/serve-browser-tests.ts",
 		"build:example": "deno run -A scripts/build-example.ts",
 		"serve:example": "deno run -A scripts/signaling-server.ts",
 		"npm:build": "deno run -A scripts/build-npm.ts",

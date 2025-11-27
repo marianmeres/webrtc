@@ -825,9 +825,14 @@ export class WebRtcManager {
 			this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, dc);
 			this.#dataChannels.delete(dc.label);
 		};
-		dc.onerror = (error) => {
-			console.error("Data Channel Error:", error);
-			this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
+		dc.onerror = (error: any) => {
+			// Ignore "User-Initiated Abort" errors which occur during intentional close()
+			const isUserAbort =
+				error?.error?.message?.includes("User-Initiated Abort");
+			if (!isUserAbort) {
+				console.error("Data Channel Error:", error);
+				this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
+			}
 		};
 	}
 }
