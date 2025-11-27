@@ -1,6 +1,6 @@
 # @marianmeres/webrtc
 
-> **Full Disclosure:** This code was written by Claude (Anthropic's AI). The human just asked nicely and occasionally said "thanks". So if you find bugs, blame the prompt engineer. If it works perfectly, Claude accepts all credit. 🤖
+> **Full Disclosure:** This code was written by Claude (Anthropic's AI). The human (that is me, @marianmeres) just asked nicely and occasionally said "thanks". So if you find bugs, blame the prompt engineer. If it works perfectly, Claude accepts all credit. 🤖
 
 A lightweight, framework-agnostic WebRTC manager with state machine-based lifecycle management and event-driven architecture.
 
