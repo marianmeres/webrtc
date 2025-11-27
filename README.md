@@ -370,16 +370,7 @@ connection.sendMessage('Hello!');
 
 The manager uses a finite state machine with the following states:
 
-```
-IDLE → INITIALIZING → CONNECTING → CONNECTED
-  ↑         ↓            ↓            ↓
-  └─────────────────────────────────────
-                (RESET)
-
-ERROR ──(RESET)──→ IDLE
-DISCONNECTED ──(RESET)──→ IDLE
-RECONNECTING ──(CONNECT)──→ CONNECTING
-```
+![State Diagram](states.png "State Diagram")
 
 ## License
 
