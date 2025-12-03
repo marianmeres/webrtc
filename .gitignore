@@ -2,6 +2,8 @@ node_modules
 .npm-dist
 .idea
 .DS_Store
+.claude
+
 
 # Browser test build artifacts
 tests/browser/*.js

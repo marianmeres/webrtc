@@ -1,7 +1,5 @@
 # @marianmeres/webrtc
 
-> **Full Disclosure:** This code was written by Claude (Anthropic's AI). The human (that is @marianmeres) just asked nicely, occasionally said "thanks", and went through about 47 iterations of "could you improve this", "what about that", and "make it so that...". To be fair, the prompt engineering was top-notch. So if you find bugs, we'll split the blame 50/50. If it works perfectly, Claude gets 95% of the credit and @marianmeres gets the remaining 5% for excellent taste in asking the right questions. 🤖
-
 A lightweight, framework-agnostic WebRTC manager with state machine-based lifecycle management and event-driven architecture.
 
 ## Features
@@ -365,6 +363,10 @@ const connection = new P2PConnection('wss://your-signaling-server.com');
 await connection.createOffer();
 connection.sendMessage('Hello!');
 ```
+
+## API Reference
+
+For complete API documentation, see [API.md](API.md).
 
 ## State Machine
 
