@@ -8,19 +8,56 @@ import {
 	type WebRtcEvents,
 } from "./types.ts";
 
+/**
+ * WebRTC connection manager with FSM-based lifecycle and event-driven architecture.
+ *
+ * Provides a high-level API for managing WebRTC peer connections, audio streams,
+ * and data channels. The manager uses a finite state machine to handle connection
+ * lifecycle and emits events for all state changes and important occurrences.
+ *
+ * @example
+ * ```typescript
+ * const factory = {
+ *   createPeerConnection: (config) => new RTCPeerConnection(config),
+ *   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+ *   enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
+ * };
+ *
+ * const manager = new WebRtcManager(factory, {
+ *   peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+ *   enableMicrophone: true,
+ * });
+ *
+ * await manager.initialize();
+ * await manager.connect();
+ * const offer = await manager.createOffer();
+ * await manager.setLocalDescription(offer);
+ * ```
+ */
 export class WebRtcManager {
-	// Event name constants
+	/** Event emitted when connection state changes. Payload: {@link WebRtcState} */
 	static readonly EVENT_STATE_CHANGE = "state_change";
+	/** Event emitted when local media stream changes. Payload: `MediaStream | null` */
 	static readonly EVENT_LOCAL_STREAM = "local_stream";
+	/** Event emitted when remote media stream is received. Payload: `MediaStream | null` */
 	static readonly EVENT_REMOTE_STREAM = "remote_stream";
+	/** Event emitted when a data channel opens. Payload: `RTCDataChannel` */
 	static readonly EVENT_DATA_CHANNEL_OPEN = "data_channel_open";
+	/** Event emitted when a data channel receives a message. Payload: `{ channel: RTCDataChannel; data: any }` */
 	static readonly EVENT_DATA_CHANNEL_MESSAGE = "data_channel_message";
+	/** Event emitted when a data channel closes. Payload: `RTCDataChannel` */
 	static readonly EVENT_DATA_CHANNEL_CLOSE = "data_channel_close";
+	/** Event emitted when an ICE candidate is generated. Payload: `RTCIceCandidate | null` */
 	static readonly EVENT_ICE_CANDIDATE = "ice_candidate";
+	/** Event emitted when reconnection is attempted. Payload: `{ attempt: number; strategy: "ice-restart" | "full" }` */
 	static readonly EVENT_RECONNECTING = "reconnecting";
+	/** Event emitted when all reconnection attempts fail. Payload: `{ attempts: number }` */
 	static readonly EVENT_RECONNECT_FAILED = "reconnect_failed";
+	/** Event emitted when audio devices change. Payload: `MediaDeviceInfo[]` */
 	static readonly EVENT_DEVICE_CHANGED = "device_changed";
+	/** Event emitted when microphone access fails. Payload: `{ error?: any; reason?: string }` */
 	static readonly EVENT_MICROPHONE_FAILED = "microphone_failed";
+	/** Event emitted when an error occurs. Payload: `Error` */
 	static readonly EVENT_ERROR = "error";
 
 	#fsm: FSM<WebRtcState, WebRtcFsmEvent>;
@@ -35,6 +72,11 @@ export class WebRtcManager {
 	#reconnectTimer: number | null = null;
 	#deviceChangeHandler: (() => void) | null = null;
 
+	/**
+	 * Creates a new WebRtcManager instance.
+	 * @param factory - Factory object providing WebRTC primitives (peer connection, media, devices).
+	 * @param config - Optional configuration for the manager.
+	 */
 	constructor(factory: WebRtcFactory, config: WebRtcManagerConfig = {}) {
 		this.#factory = factory;
 		this.#config = config;
@@ -121,6 +163,8 @@ export class WebRtcManager {
 
 	/**
 	 * Subscribe to a specific WebRTC event.
+	 * @param event - The event name to subscribe to (e.g., "state_change", "ice_candidate").
+	 * @param handler - Callback function that receives the event data.
 	 * @returns Unsubscribe function to remove the event listener.
 	 */
 	on(event: keyof WebRtcEvents, handler: (data: any) => void): () => void {

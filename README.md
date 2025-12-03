@@ -1,5 +1,8 @@
 # @marianmeres/webrtc
 
+[![NPM Version](https://img.shields.io/npm/v/@marianmeres/webrtc)](https://www.npmjs.com/package/@marianmeres/webrtc)
+[![JSR Version](https://jsr.io/badges/@marianmeres/webrtc)](https://jsr.io/@marianmeres/webrtc)
+
 A lightweight, framework-agnostic WebRTC manager with state machine-based lifecycle management and event-driven architecture.
 
 ## Features
