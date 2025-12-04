@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { WebRtcManager } from "../src/webrtc-manager.ts";
-import { WebRtcState } from "../src/types.ts";
+import { WebRtcState, type Logger } from "../src/types.ts";
 import { MockWebRtcFactory } from "./mocks.ts";
 
 Deno.test("Initial State", () => {
@@ -114,4 +114,121 @@ Deno.test("Data Channel", async () => {
 
 	if (dc!.onmessage) dc!.onmessage({ data: "hello" } as MessageEvent);
 	assertEquals(lastMessage, "hello");
+});
+
+Deno.test("Custom Logger - debug logs when debug enabled", async () => {
+	const factory = new MockWebRtcFactory();
+	const logs: { level: string; args: any[] }[] = [];
+
+	const customLogger: Logger = {
+		debug: (...args) => {
+			logs.push({ level: "debug", args });
+			return String(args[0] ?? "");
+		},
+		log: (...args) => {
+			logs.push({ level: "log", args });
+			return String(args[0] ?? "");
+		},
+		warn: (...args) => {
+			logs.push({ level: "warn", args });
+			return String(args[0] ?? "");
+		},
+		error: (...args) => {
+			logs.push({ level: "error", args });
+			return String(args[0] ?? "");
+		},
+	};
+
+	const manager = new WebRtcManager(factory, {
+		debug: true,
+		logger: customLogger,
+	});
+
+	await manager.initialize();
+
+	// Should have debug logs from initialization
+	const debugLogs = logs.filter((l) => l.level === "debug");
+	assertEquals(debugLogs.length > 0, true);
+	assertEquals(debugLogs[0].args[0], "[WebRtcManager]");
+});
+
+Deno.test("Custom Logger - no debug logs when debug disabled", async () => {
+	const factory = new MockWebRtcFactory();
+	const logs: { level: string; args: any[] }[] = [];
+
+	const customLogger: Logger = {
+		debug: (...args) => {
+			logs.push({ level: "debug", args });
+			return String(args[0] ?? "");
+		},
+		log: (...args) => {
+			logs.push({ level: "log", args });
+			return String(args[0] ?? "");
+		},
+		warn: (...args) => {
+			logs.push({ level: "warn", args });
+			return String(args[0] ?? "");
+		},
+		error: (...args) => {
+			logs.push({ level: "error", args });
+			return String(args[0] ?? "");
+		},
+	};
+
+	const manager = new WebRtcManager(factory, {
+		debug: false, // Debug disabled
+		logger: customLogger,
+	});
+
+	await manager.initialize();
+
+	// Should NOT have debug logs when debug is disabled
+	const debugLogs = logs.filter((l) => l.level === "debug");
+	assertEquals(debugLogs.length, 0);
+});
+
+Deno.test("Custom Logger - errors are logged via logger", async () => {
+	const factory = new MockWebRtcFactory();
+	const logs: { level: string; args: any[] }[] = [];
+
+	const customLogger: Logger = {
+		debug: (...args) => {
+			logs.push({ level: "debug", args });
+			return String(args[0] ?? "");
+		},
+		log: (...args) => {
+			logs.push({ level: "log", args });
+			return String(args[0] ?? "");
+		},
+		warn: (...args) => {
+			logs.push({ level: "warn", args });
+			return String(args[0] ?? "");
+		},
+		error: (...args) => {
+			logs.push({ level: "error", args });
+			return String(args[0] ?? "");
+		},
+	};
+
+	const manager = new WebRtcManager(factory, {
+		logger: customLogger,
+	});
+
+	// Try to switch microphone without initialization (should log error)
+	await manager.switchMicrophone("test-device");
+
+	// Should have error log
+	const errorLogs = logs.filter((l) => l.level === "error");
+	assertEquals(errorLogs.length > 0, true);
+	// Error logs include the prefix in the message
+	assertEquals(String(errorLogs[0].args[0]).startsWith("[WebRtcManager]"), true);
+});
+
+Deno.test("Default Logger - falls back to console when no logger provided", () => {
+	const factory = new MockWebRtcFactory();
+
+	// Should not throw when no logger is provided
+	const manager = new WebRtcManager(factory, { debug: true });
+
+	assertEquals(manager.state, WebRtcState.IDLE);
 });

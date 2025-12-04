@@ -3,10 +3,34 @@ import { PubSub } from "@marianmeres/pubsub";
 import {
 	type WebRtcFactory,
 	type WebRtcManagerConfig,
+	type Logger,
 	WebRtcState,
 	WebRtcFsmEvent,
 	type WebRtcEvents,
 } from "./types.ts";
+
+/**
+ * Default console-based logger that wraps console methods to satisfy the Logger interface.
+ * Returns string representation of the first argument for chaining.
+ */
+const createDefaultLogger = (): Logger => ({
+	debug: (...args: any[]) => {
+		console.debug(...args);
+		return String(args[0] ?? "");
+	},
+	log: (...args: any[]) => {
+		console.log(...args);
+		return String(args[0] ?? "");
+	},
+	warn: (...args: any[]) => {
+		console.warn(...args);
+		return String(args[0] ?? "");
+	},
+	error: (...args: any[]) => {
+		console.error(...args);
+		return String(args[0] ?? "");
+	},
+});
 
 /**
  * WebRTC connection manager with FSM-based lifecycle and event-driven architecture.
@@ -65,6 +89,7 @@ export class WebRtcManager {
 	#pc: RTCPeerConnection | null = null;
 	#factory: WebRtcFactory;
 	#config: WebRtcManagerConfig;
+	#logger: Logger;
 	#localStream: MediaStream | null = null;
 	#remoteStream: MediaStream | null = null;
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
@@ -80,6 +105,7 @@ export class WebRtcManager {
 	constructor(factory: WebRtcFactory, config: WebRtcManagerConfig = {}) {
 		this.#factory = factory;
 		this.#config = config;
+		this.#logger = config.logger ?? createDefaultLogger();
 		this.#pubsub = new PubSub();
 
 		// Initialize FSM
@@ -233,7 +259,7 @@ export class WebRtcManager {
 			const devices = await this.#factory.enumerateDevices();
 			return devices.filter((d) => d.kind === "audioinput");
 		} catch (e) {
-			console.error("Failed to enumerate devices:", e);
+			this.#logger.error("[WebRtcManager] Failed to enumerate devices:", e);
 			return [];
 		}
 	}
@@ -245,8 +271,8 @@ export class WebRtcManager {
 	 */
 	async switchMicrophone(deviceId: string): Promise<boolean> {
 		if (!this.#pc || !this.#localStream) {
-			console.error(
-				"Cannot switch microphone: not initialized or no active stream"
+			this.#logger.error(
+				"[WebRtcManager] Cannot switch microphone: not initialized or no active stream"
 			);
 			return false;
 		}
@@ -293,7 +319,7 @@ export class WebRtcManager {
 
 			return true;
 		} catch (e) {
-			console.error("Failed to switch microphone:", e);
+			this.#logger.error("[WebRtcManager] Failed to switch microphone:", e);
 			this.#error(e);
 			return false;
 		}
@@ -304,17 +330,23 @@ export class WebRtcManager {
 	 * Must be called before creating offers or answers. Can only be called from IDLE state.
 	 */
 	async initialize(): Promise<void> {
-		if (this.state !== WebRtcState.IDLE) return;
+		if (this.state !== WebRtcState.IDLE) {
+			this.#debug("initialize() called but state is not IDLE:", this.state);
+			return;
+		}
+		this.#debug("Initializing...");
 		this.#dispatch(WebRtcFsmEvent.INIT);
 
 		try {
 			this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
+			this.#debug("Peer connection created");
 			this.#setupPcListeners();
 
 			// Setup device change detection now that we have a connection
 			this.#setupDeviceChangeListener();
 
 			if (this.#config.enableMicrophone) {
+				this.#debug("Enabling microphone (config enabled)");
 				const success = await this.enableMicrophone(true);
 				if (!success) {
 					this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, {
@@ -325,11 +357,14 @@ export class WebRtcManager {
 				// Always setup to receive audio, even if we don't enable microphone
 				// This ensures the SDP includes audio media line
 				this.#pc.addTransceiver("audio", { direction: "recvonly" });
+				this.#debug("Added recvonly audio transceiver");
 			}
 
 			if (this.#config.dataChannelLabel) {
+				this.#debug("Creating default data channel:", this.#config.dataChannelLabel);
 				this.createDataChannel(this.#config.dataChannelLabel);
 			}
+			this.#debug("Initialization complete");
 		} catch (e) {
 			this.#error(e);
 		}
@@ -340,13 +375,17 @@ export class WebRtcManager {
 	 * If disconnected, reinitializes the peer connection.
 	 */
 	async connect(): Promise<void> {
+		this.#debug("connect() called, current state:", this.state);
+
 		// Initialize if needed
 		if (this.state === WebRtcState.IDLE) {
+			this.#debug("State is IDLE, initializing first");
 			await this.initialize();
 		}
 
 		// Reinitialize if disconnected (PeerConnection was closed)
 		if (this.state === WebRtcState.DISCONNECTED) {
+			this.#debug("State is DISCONNECTED, reinitializing");
 			// Clean up old connection
 			this.#cleanup();
 			// Reset to IDLE and reinitialize
@@ -359,9 +398,12 @@ export class WebRtcManager {
 		if (
 			this.state === WebRtcState.CONNECTED ||
 			this.state === WebRtcState.CONNECTING
-		)
+		) {
+			this.#debug("Already connected or connecting, skipping");
 			return;
+		}
 
+		this.#debug("Transitioning to CONNECTING");
 		this.#dispatch(WebRtcFsmEvent.CONNECT);
 	}
 
@@ -371,13 +413,20 @@ export class WebRtcManager {
 	 * @returns True if successful, false if failed to get user media.
 	 */
 	async enableMicrophone(enable: boolean): Promise<boolean> {
+		this.#debug("enableMicrophone() called:", enable);
+
 		if (enable) {
-			if (this.#localStream) return true; // Already enabled
+			if (this.#localStream) {
+				this.#debug("Microphone already enabled");
+				return true;
+			}
 			try {
+				this.#debug("Requesting user media...");
 				const stream = await this.#factory.getUserMedia({
 					audio: true,
 					video: false,
 				});
+				this.#debug("User media obtained, tracks:", stream.getAudioTracks().length);
 				this.#localStream = stream;
 				this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, stream);
 
@@ -394,21 +443,28 @@ export class WebRtcManager {
 						await audioTransceiver.sender.replaceTrack(track);
 						// Update direction to sendrecv
 						audioTransceiver.direction = "sendrecv";
+						this.#debug("Replaced track in existing transceiver");
 					} else {
 						// Add track normally
 						stream.getTracks().forEach((track) => {
 							this.#pc!.addTrack(track, stream);
 						});
+						this.#debug("Added tracks to peer connection");
 					}
 				}
+				this.#debug("Microphone enabled successfully");
 				return true;
 			} catch (e) {
-				console.error("Failed to get user media", e);
+				this.#logger.error("[WebRtcManager] Failed to get user media:", e);
 				this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, { error: e });
 				return false;
 			}
 		} else {
-			if (!this.#localStream) return true;
+			if (!this.#localStream) {
+				this.#debug("Microphone already disabled");
+				return true;
+			}
+			this.#debug("Disabling microphone...");
 			this.#localStream.getTracks().forEach((track) => {
 				track.stop();
 				// Remove from PC if needed, or just stop sending
@@ -422,6 +478,7 @@ export class WebRtcManager {
 			});
 			this.#localStream = null;
 			this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, null);
+			this.#debug("Microphone disabled");
 			return true;
 		}
 	}
@@ -431,6 +488,7 @@ export class WebRtcManager {
 	 * Transitions to DISCONNECTED state.
 	 */
 	disconnect(): void {
+		this.#debug("disconnect() called");
 		this.#cleanup();
 		this.#dispatch(WebRtcFsmEvent.DISCONNECT);
 	}
@@ -440,6 +498,7 @@ export class WebRtcManager {
 	 * Cleans up all resources and allows reinitialization.
 	 */
 	reset(): void {
+		this.#debug("reset() called, current state:", this.state);
 		this.#cleanup();
 
 		// Reset from any non-IDLE state
@@ -457,6 +516,7 @@ export class WebRtcManager {
 				this.#dispatch(WebRtcFsmEvent.RESET);
 			}
 		}
+		this.#debug("Reset complete, state:", this.state);
 	}
 
 	/**
@@ -470,13 +530,22 @@ export class WebRtcManager {
 		label: string,
 		options?: RTCDataChannelInit
 	): RTCDataChannel | null {
-		if (!this.#pc) return null;
-		if (this.#dataChannels.has(label)) return this.#dataChannels.get(label)!;
+		this.#debug("createDataChannel() called:", label);
+
+		if (!this.#pc) {
+			this.#debug("Cannot create data channel: peer connection not initialized");
+			return null;
+		}
+		if (this.#dataChannels.has(label)) {
+			this.#debug("Returning existing data channel:", label);
+			return this.#dataChannels.get(label)!;
+		}
 
 		try {
 			const dc = this.#pc.createDataChannel(label, options);
 			this.#setupDataChannelListeners(dc);
 			this.#dataChannels.set(label, dc);
+			this.#debug("Data channel created:", label);
 			return dc;
 		} catch (e) {
 			this.#error(e);
@@ -534,9 +603,14 @@ export class WebRtcManager {
 	async createOffer(
 		options?: RTCOfferOptions
 	): Promise<RTCSessionDescriptionInit | null> {
-		if (!this.#pc) return null;
+		this.#debug("createOffer() called");
+		if (!this.#pc) {
+			this.#debug("Cannot create offer: peer connection not initialized");
+			return null;
+		}
 		try {
 			const offer = await this.#pc.createOffer(options);
+			this.#debug("Offer created:", offer.type);
 			return offer;
 		} catch (e) {
 			this.#error(e);
@@ -552,9 +626,14 @@ export class WebRtcManager {
 	async createAnswer(
 		options?: RTCAnswerOptions
 	): Promise<RTCSessionDescriptionInit | null> {
-		if (!this.#pc) return null;
+		this.#debug("createAnswer() called");
+		if (!this.#pc) {
+			this.#debug("Cannot create answer: peer connection not initialized");
+			return null;
+		}
 		try {
 			const answer = await this.#pc.createAnswer(options);
+			this.#debug("Answer created:", answer.type);
 			return answer;
 		} catch (e) {
 			this.#error(e);
@@ -570,9 +649,14 @@ export class WebRtcManager {
 	async setLocalDescription(
 		description: RTCSessionDescriptionInit
 	): Promise<boolean> {
-		if (!this.#pc) return false;
+		this.#debug("setLocalDescription() called:", description.type);
+		if (!this.#pc) {
+			this.#debug("Cannot set local description: peer connection not initialized");
+			return false;
+		}
 		try {
 			await this.#pc.setLocalDescription(description);
+			this.#debug("Local description set successfully");
 			return true;
 		} catch (e) {
 			this.#error(e);
@@ -588,9 +672,14 @@ export class WebRtcManager {
 	async setRemoteDescription(
 		description: RTCSessionDescriptionInit
 	): Promise<boolean> {
-		if (!this.#pc) return false;
+		this.#debug("setRemoteDescription() called:", description.type);
+		if (!this.#pc) {
+			this.#debug("Cannot set remote description: peer connection not initialized");
+			return false;
+		}
 		try {
 			await this.#pc.setRemoteDescription(description);
+			this.#debug("Remote description set successfully");
 			return true;
 		} catch (e) {
 			this.#error(e);
@@ -606,10 +695,15 @@ export class WebRtcManager {
 	async addIceCandidate(
 		candidate: RTCIceCandidateInit | null
 	): Promise<boolean> {
-		if (!this.#pc) return false;
+		this.#debug("addIceCandidate() called:", candidate ? "candidate" : "null (end-of-candidates)");
+		if (!this.#pc) {
+			this.#debug("Cannot add ICE candidate: peer connection not initialized");
+			return false;
+		}
 		try {
 			if (candidate) {
 				await this.#pc.addIceCandidate(candidate);
+				this.#debug("ICE candidate added");
 			}
 			return true;
 		} catch (e) {
@@ -624,10 +718,15 @@ export class WebRtcManager {
 	 * @returns True if successful, false otherwise.
 	 */
 	async iceRestart(): Promise<boolean> {
-		if (!this.#pc) return false;
+		this.#debug("iceRestart() called");
+		if (!this.#pc) {
+			this.#debug("Cannot perform ICE restart: peer connection not initialized");
+			return false;
+		}
 		try {
 			const offer = await this.#pc.createOffer({ iceRestart: true });
 			await this.#pc.setLocalDescription(offer);
+			this.#debug("ICE restart initiated");
 			return true;
 		} catch (e) {
 			this.#error(e);
@@ -673,27 +772,30 @@ export class WebRtcManager {
 		const newState = this.#fsm.state;
 
 		if (oldState !== newState) {
+			this.#debug("State transition:", oldState, "->", newState, "(event:", event + ")");
 			this.#pubsub.publish(WebRtcManager.EVENT_STATE_CHANGE, newState);
 		}
 	}
 
 	#debug(...args: any[]) {
 		if (this.#config.debug) {
-			console.debug("[WebRtcManager]", ...args);
+			this.#logger.debug("[WebRtcManager]", ...args);
 		}
 	}
 
 	#error(error: any) {
-		console.error(error);
+		this.#logger.error("[WebRtcManager]", error);
 		this.#dispatch(WebRtcFsmEvent.ERROR);
 		this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
 	}
 
 	#setupPcListeners() {
 		if (!this.#pc) return;
+		this.#debug("Setting up peer connection listeners");
 
 		this.#pc.onconnectionstatechange = () => {
 			const state = this.#pc!.connectionState;
+			this.#debug("Connection state changed:", state);
 			if (state === "connected") {
 				// Connection successful - reset reconnect attempts
 				this.#reconnectAttempts = 0;
@@ -707,6 +809,7 @@ export class WebRtcManager {
 		};
 
 		this.#pc.ontrack = (event) => {
+			this.#debug("Remote track received:", event.track.kind);
 			if (event.streams && event.streams[0]) {
 				this.#remoteStream = event.streams[0];
 				this.#pubsub.publish(WebRtcManager.EVENT_REMOTE_STREAM, this.#remoteStream);
@@ -715,16 +818,20 @@ export class WebRtcManager {
 
 		this.#pc.ondatachannel = (event) => {
 			const dc = event.channel;
+			this.#debug("Remote data channel received:", dc.label);
 			this.#setupDataChannelListeners(dc);
 			this.#dataChannels.set(dc.label, dc);
 		};
 
 		this.#pc.onicecandidate = (event) => {
+			this.#debug("ICE candidate generated:", event.candidate ? "candidate" : "null (gathering complete)");
 			this.#pubsub.publish(WebRtcManager.EVENT_ICE_CANDIDATE, event.candidate);
 		};
 	}
 
 	#cleanup() {
+		this.#debug("Cleanup started");
+
 		// Clear any pending reconnect timers
 		if (this.#reconnectTimer !== null) {
 			clearTimeout(this.#reconnectTimer);
@@ -741,33 +848,42 @@ export class WebRtcManager {
 		}
 
 		// Close all data channels
+		const dcCount = this.#dataChannels.size;
 		this.#dataChannels.forEach((dc) => {
 			if (dc.readyState !== "closed") {
 				dc.close();
 			}
 		});
 		this.#dataChannels.clear();
+		if (dcCount > 0) {
+			this.#debug("Closed", dcCount, "data channel(s)");
+		}
 
 		// Stop local stream tracks
 		if (this.#localStream) {
 			this.#localStream.getTracks().forEach((track) => track.stop());
 			this.#localStream = null;
+			this.#debug("Local stream stopped");
 		}
 
 		// Close peer connection
 		if (this.#pc) {
 			this.#pc.close();
 			this.#pc = null;
+			this.#debug("Peer connection closed");
 		}
 
 		this.#remoteStream = null;
+		this.#debug("Cleanup complete");
 	}
 
 	#handleConnectionFailure() {
+		this.#debug("Handling connection failure");
 		this.#dispatch(WebRtcFsmEvent.DISCONNECT);
 
 		// Check if auto-reconnect is enabled
 		if (!this.#config.autoReconnect) {
+			this.#debug("Auto-reconnect disabled, not attempting reconnection");
 			return;
 		}
 
@@ -775,6 +891,7 @@ export class WebRtcManager {
 
 		// Check if we've exceeded max attempts
 		if (this.#reconnectAttempts >= maxAttempts) {
+			this.#debug("Max reconnection attempts reached:", maxAttempts);
 			this.#pubsub.publish(WebRtcManager.EVENT_RECONNECT_FAILED, {
 				attempts: this.#reconnectAttempts,
 			});
@@ -795,6 +912,12 @@ export class WebRtcManager {
 
 		// Try ICE restart first (attempts 1-2), then full reconnect
 		const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
+
+		this.#debug("Attempting reconnection:", {
+			attempt: this.#reconnectAttempts,
+			strategy,
+			delay: delay + "ms",
+		});
 
 		this.#pubsub.publish(WebRtcManager.EVENT_RECONNECTING, {
 			attempt: this.#reconnectAttempts,
@@ -822,7 +945,7 @@ export class WebRtcManager {
 					await this.connect();
 					// If successful, onconnectionstatechange will reset attempts
 				} catch (e) {
-					console.error("Reconnection failed:", e);
+					this.#logger.error("[WebRtcManager] Reconnection failed:", e);
 					this.#handleConnectionFailure();
 				}
 			}
@@ -845,7 +968,7 @@ export class WebRtcManager {
 				const devices = await this.getAudioInputDevices();
 				this.#pubsub.publish(WebRtcManager.EVENT_DEVICE_CHANGED, devices);
 			} catch (e) {
-				console.error("Error handling device change:", e);
+				this.#logger.error("[WebRtcManager] Error handling device change:", e);
 			}
 		};
 
@@ -874,7 +997,7 @@ export class WebRtcManager {
 			const isUserAbort =
 				error?.error?.message?.includes("User-Initiated Abort");
 			if (!isUserAbort) {
-				console.error("Data Channel Error:", error);
+				this.#logger.error("[WebRtcManager] Data channel error:", error);
 				this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
 			}
 		};

@@ -681,6 +681,36 @@ console.log(manager.toMermaid());
 
 ## Types
 
+### Logger
+
+Console-compatible logger interface for custom logging implementations.
+
+```typescript
+interface Logger {
+  debug: (...args: any[]) => string;
+  log: (...args: any[]) => string;
+  warn: (...args: any[]) => string;
+  error: (...args: any[]) => string;
+}
+```
+
+Each method accepts variadic arguments and returns a string representation of the first argument. This enables patterns like `throw new Error(logger.error("msg"))`.
+
+**Example Custom Logger:**
+
+```typescript
+import { clog } from '@marianmeres/clog';
+
+const logger = clog('WebRTC');
+
+const manager = new WebRtcManager(factory, {
+  debug: true,
+  logger: logger,
+});
+```
+
+---
+
 ### WebRtcFactory
 
 Interface for dependency injection of WebRTC primitives.
@@ -731,6 +761,9 @@ interface WebRtcManagerConfig {
 
   /** Enable debug logging. Default: false */
   debug?: boolean;
+
+  /** Custom logger instance. If not provided, falls back to console. */
+  logger?: Logger;
 }
 ```
 

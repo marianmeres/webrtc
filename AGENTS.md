@@ -117,6 +117,21 @@ ERROR         --RESET-->       IDLE
 new WebRtcManager(factory: WebRtcFactory, config?: WebRtcManagerConfig)
 ```
 
+### Logger Interface
+
+Console-compatible logger interface for custom logging implementations.
+
+```typescript
+interface Logger {
+  debug: (...args: any[]) => string;
+  log: (...args: any[]) => string;
+  warn: (...args: any[]) => string;
+  error: (...args: any[]) => string;
+}
+```
+
+Each method returns a string representation of the first argument, enabling patterns like `throw new Error(logger.error("msg"))`.
+
 ### WebRtcFactory Interface
 
 ```typescript
@@ -138,6 +153,7 @@ interface WebRtcManagerConfig {
   maxReconnectAttempts?: number;      // Default: 5
   reconnectDelay?: number;            // Default: 1000ms
   debug?: boolean;                    // Default: false
+  logger?: Logger;                    // Custom logger, falls back to console
 }
 ```
 

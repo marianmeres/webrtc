@@ -1,3 +1,15 @@
+/**
+ * Console-compatible logger interface.
+ * Each method accepts variadic arguments and returns a string representation of the first argument.
+ * This enables patterns like `throw new Error(logger.error("msg"))`.
+ */
+export interface Logger {
+	debug: (...args: any[]) => string;
+	log: (...args: any[]) => string;
+	warn: (...args: any[]) => string;
+	error: (...args: any[]) => string;
+}
+
 export interface WebRtcManagerConfig {
 	/** Initial peer configuration (ICE servers, etc.) */
 	peerConfig?: RTCConfiguration;
@@ -11,8 +23,10 @@ export interface WebRtcManagerConfig {
 	maxReconnectAttempts?: number;
 	/** Initial reconnection delay in ms. Doubles with each attempt. Defaults to 1000. */
 	reconnectDelay?: number;
-	/** Debug mode for logging */
+	/** Enable debug logging. Defaults to false. */
 	debug?: boolean;
+	/** Custom logger instance. If not provided, falls back to console. */
+	logger?: Logger;
 }
 
 export interface WebRtcFactory {

@@ -52,6 +52,7 @@ const manager = new WebRtcManager(factory, config);
 - `maxReconnectAttempts`: Max reconnection attempts (default: 5)
 - `reconnectDelay`: Initial reconnection delay in ms (default: 1000)
 - `debug`: Enable debug logging (default: false)
+- `logger`: Custom logger instance implementing `Logger` interface (default: console)
 
 ### State and Properties
 
