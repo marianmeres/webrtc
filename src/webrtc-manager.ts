@@ -10,22 +10,26 @@ import {
 } from "./types.ts";
 
 /**
- * Default console-based logger that wraps console methods to satisfy the Logger interface.
+ * Default console-based logger that wraps console methods.
  * Returns string representation of the first argument for chaining.
  */
 const createDefaultLogger = (): Logger => ({
+	// deno-lint-ignore no-explicit-any
 	debug: (...args: any[]) => {
 		console.debug(...args);
 		return String(args[0] ?? "");
 	},
+	// deno-lint-ignore no-explicit-any
 	log: (...args: any[]) => {
 		console.log(...args);
 		return String(args[0] ?? "");
 	},
+	// deno-lint-ignore no-explicit-any
 	warn: (...args: any[]) => {
 		console.warn(...args);
 		return String(args[0] ?? "");
 	},
+	// deno-lint-ignore no-explicit-any
 	error: (...args: any[]) => {
 		console.error(...args);
 		return String(args[0] ?? "");
@@ -193,6 +197,7 @@ export class WebRtcManager {
 	 * @param handler - Callback function that receives the event data.
 	 * @returns Unsubscribe function to remove the event listener.
 	 */
+	// deno-lint-ignore no-explicit-any
 	on(event: keyof WebRtcEvents, handler: (data: any) => void): () => void {
 		return this.#pubsub.subscribe(event, handler);
 	}
@@ -361,7 +366,10 @@ export class WebRtcManager {
 			}
 
 			if (this.#config.dataChannelLabel) {
-				this.#debug("Creating default data channel:", this.#config.dataChannelLabel);
+				this.#debug(
+					"Creating default data channel:",
+					this.#config.dataChannelLabel
+				);
 				this.createDataChannel(this.#config.dataChannelLabel);
 			}
 			this.#debug("Initialization complete");
@@ -426,7 +434,10 @@ export class WebRtcManager {
 					audio: true,
 					video: false,
 				});
-				this.#debug("User media obtained, tracks:", stream.getAudioTracks().length);
+				this.#debug(
+					"User media obtained, tracks:",
+					stream.getAudioTracks().length
+				);
 				this.#localStream = stream;
 				this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, stream);
 
@@ -456,7 +467,9 @@ export class WebRtcManager {
 				return true;
 			} catch (e) {
 				this.#logger.error("[WebRtcManager] Failed to get user media:", e);
-				this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, { error: e });
+				this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, {
+					error: e,
+				});
 				return false;
 			}
 		} else {
@@ -533,7 +546,9 @@ export class WebRtcManager {
 		this.#debug("createDataChannel() called:", label);
 
 		if (!this.#pc) {
-			this.#debug("Cannot create data channel: peer connection not initialized");
+			this.#debug(
+				"Cannot create data channel: peer connection not initialized"
+			);
 			return null;
 		}
 		if (this.#dataChannels.has(label)) {
@@ -651,7 +666,9 @@ export class WebRtcManager {
 	): Promise<boolean> {
 		this.#debug("setLocalDescription() called:", description.type);
 		if (!this.#pc) {
-			this.#debug("Cannot set local description: peer connection not initialized");
+			this.#debug(
+				"Cannot set local description: peer connection not initialized"
+			);
 			return false;
 		}
 		try {
@@ -674,7 +691,9 @@ export class WebRtcManager {
 	): Promise<boolean> {
 		this.#debug("setRemoteDescription() called:", description.type);
 		if (!this.#pc) {
-			this.#debug("Cannot set remote description: peer connection not initialized");
+			this.#debug(
+				"Cannot set remote description: peer connection not initialized"
+			);
 			return false;
 		}
 		try {
@@ -695,7 +714,10 @@ export class WebRtcManager {
 	async addIceCandidate(
 		candidate: RTCIceCandidateInit | null
 	): Promise<boolean> {
-		this.#debug("addIceCandidate() called:", candidate ? "candidate" : "null (end-of-candidates)");
+		this.#debug(
+			"addIceCandidate() called:",
+			candidate ? "candidate" : "null (end-of-candidates)"
+		);
 		if (!this.#pc) {
 			this.#debug("Cannot add ICE candidate: peer connection not initialized");
 			return false;
@@ -720,7 +742,9 @@ export class WebRtcManager {
 	async iceRestart(): Promise<boolean> {
 		this.#debug("iceRestart() called");
 		if (!this.#pc) {
-			this.#debug("Cannot perform ICE restart: peer connection not initialized");
+			this.#debug(
+				"Cannot perform ICE restart: peer connection not initialized"
+			);
 			return false;
 		}
 		try {
@@ -772,17 +796,26 @@ export class WebRtcManager {
 		const newState = this.#fsm.state;
 
 		if (oldState !== newState) {
-			this.#debug("State transition:", oldState, "->", newState, "(event:", event + ")");
+			this.#debug(
+				"State transition:",
+				oldState,
+				"->",
+				newState,
+				"(event:",
+				event + ")"
+			);
 			this.#pubsub.publish(WebRtcManager.EVENT_STATE_CHANGE, newState);
 		}
 	}
 
+	// deno-lint-ignore no-explicit-any
 	#debug(...args: any[]) {
 		if (this.#config.debug) {
 			this.#logger.debug("[WebRtcManager]", ...args);
 		}
 	}
 
+	// deno-lint-ignore no-explicit-any
 	#error(error: any) {
 		this.#logger.error("[WebRtcManager]", error);
 		this.#dispatch(WebRtcFsmEvent.ERROR);
@@ -804,7 +837,14 @@ export class WebRtcManager {
 				// Connection failed - attempt reconnection if enabled
 				this.#handleConnectionFailure();
 			} else if (state === "disconnected" || state === "closed") {
-				this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+				// Only dispatch if not already in a terminal state
+				if (
+					this.state !== WebRtcState.DISCONNECTED &&
+					this.state !== WebRtcState.ERROR &&
+					this.state !== WebRtcState.IDLE
+				) {
+					this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+				}
 			}
 		};
 
@@ -812,7 +852,10 @@ export class WebRtcManager {
 			this.#debug("Remote track received:", event.track.kind);
 			if (event.streams && event.streams[0]) {
 				this.#remoteStream = event.streams[0];
-				this.#pubsub.publish(WebRtcManager.EVENT_REMOTE_STREAM, this.#remoteStream);
+				this.#pubsub.publish(
+					WebRtcManager.EVENT_REMOTE_STREAM,
+					this.#remoteStream
+				);
 			}
 		};
 
@@ -824,7 +867,10 @@ export class WebRtcManager {
 		};
 
 		this.#pc.onicecandidate = (event) => {
-			this.#debug("ICE candidate generated:", event.candidate ? "candidate" : "null (gathering complete)");
+			this.#debug(
+				"ICE candidate generated:",
+				event.candidate ? "candidate" : "null (gathering complete)"
+			);
 			this.#pubsub.publish(WebRtcManager.EVENT_ICE_CANDIDATE, event.candidate);
 		};
 	}
@@ -879,7 +925,15 @@ export class WebRtcManager {
 
 	#handleConnectionFailure() {
 		this.#debug("Handling connection failure");
-		this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+
+		// Only dispatch DISCONNECT if not already in a terminal state
+		if (
+			this.state !== WebRtcState.DISCONNECTED &&
+			this.state !== WebRtcState.ERROR &&
+			this.state !== WebRtcState.IDLE
+		) {
+			this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+		}
 
 		// Check if auto-reconnect is enabled
 		if (!this.#config.autoReconnect) {
@@ -992,10 +1046,12 @@ export class WebRtcManager {
 			this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, dc);
 			this.#dataChannels.delete(dc.label);
 		};
+		// deno-lint-ignore no-explicit-any
 		dc.onerror = (error: any) => {
 			// Ignore "User-Initiated Abort" errors which occur during intentional close()
-			const isUserAbort =
-				error?.error?.message?.includes("User-Initiated Abort");
+			const isUserAbort = error?.error?.message?.includes(
+				"User-Initiated Abort"
+			);
 			if (!isUserAbort) {
 				this.#logger.error("[WebRtcManager] Data channel error:", error);
 				this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);

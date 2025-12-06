@@ -35,7 +35,7 @@ const btnDisconnect = document.getElementById(
 const btnMicOn = document.getElementById("btn-mic-on") as HTMLButtonElement;
 const btnMicOff = document.getElementById("btn-mic-off") as HTMLButtonElement;
 
-function log(msg: string, data?: any) {
+function log(msg: string, data?: unknown) {
 	const div = document.createElement("div");
 	div.className = "log-entry";
 	const time = new Date().toISOString().split("T")[1].split(".")[0];
@@ -76,7 +76,7 @@ manager.on("remote_stream", (stream: MediaStream | null) => {
 	}
 });
 
-manager.on("error", (err: any) => {
+manager.on("error", (err: unknown) => {
 	log("Error:", err);
 });
 

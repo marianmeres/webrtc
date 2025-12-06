@@ -4,7 +4,7 @@
 
 ```yaml
 name: "@marianmeres/webrtc"
-version: "0.0.2"
+version: "1.0.2"
 license: MIT
 author: Marian Meres
 repository: https://github.com/marianmeres/webrtc
@@ -27,12 +27,12 @@ A lightweight, framework-agnostic WebRTC manager providing:
 
 ```yaml
 production:
-  - "@marianmeres/fsm": "^2.3.0"
-  - "@marianmeres/pubsub": "^2.4.0"
+  - "@marianmeres/fsm": "^2.11.0"
+  - "@marianmeres/pubsub": "^2.4.4"
 development:
-  - "@std/assert": testing
-  - "@std/fs": file operations
-  - "@std/path": path utilities
+  - "@std/assert": "^1.0.16"
+  - "@std/fs": "^1.0.20"
+  - "@std/path": "^1.1.3"
 ```
 
 ## File Structure
@@ -123,10 +123,10 @@ Console-compatible logger interface for custom logging implementations.
 
 ```typescript
 interface Logger {
-  debug: (...args: any[]) => string;
-  log: (...args: any[]) => string;
-  warn: (...args: any[]) => string;
-  error: (...args: any[]) => string;
+  debug: (...args: any[]) => any;
+  log: (...args: any[]) => any;
+  warn: (...args: any[]) => any;
+  error: (...args: any[]) => any;
 }
 ```
 

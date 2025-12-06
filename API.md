@@ -687,10 +687,10 @@ Console-compatible logger interface for custom logging implementations.
 
 ```typescript
 interface Logger {
-  debug: (...args: any[]) => string;
-  log: (...args: any[]) => string;
-  warn: (...args: any[]) => string;
-  error: (...args: any[]) => string;
+  debug: (...args: any[]) => any;
+  log: (...args: any[]) => any;
+  warn: (...args: any[]) => any;
+  error: (...args: any[]) => any;
 }
 ```
 

@@ -24,7 +24,7 @@ interface TestResult {
 	duration?: number;
 }
 
-function assertEquals(actual: any, expected: any, message?: string) {
+function assertEquals(actual: unknown, expected: unknown, message?: string) {
 	if (actual !== expected) {
 		throw new Error(message || `Expected ${expected}, but got ${actual}`);
 	}
@@ -489,8 +489,14 @@ const tests = [
 				});
 
 				// Verify handlers return unsubscribe functions
-				assert(typeof unsubReconnecting === "function", "Should return unsubscribe function");
-				assert(typeof unsubFailed === "function", "Should return unsubscribe function");
+				assert(
+					typeof unsubReconnecting === "function",
+					"Should return unsubscribe function"
+				);
+				assert(
+					typeof unsubFailed === "function",
+					"Should return unsubscribe function"
+				);
 
 				// Unsubscribe
 				unsubReconnecting();

@@ -118,6 +118,7 @@ Deno.test("Data Channel", async () => {
 
 Deno.test("Custom Logger - debug logs when debug enabled", async () => {
 	const factory = new MockWebRtcFactory();
+	// deno-lint-ignore no-explicit-any
 	const logs: { level: string; args: any[] }[] = [];
 
 	const customLogger: Logger = {
@@ -154,6 +155,7 @@ Deno.test("Custom Logger - debug logs when debug enabled", async () => {
 
 Deno.test("Custom Logger - no debug logs when debug disabled", async () => {
 	const factory = new MockWebRtcFactory();
+	// deno-lint-ignore no-explicit-any
 	const logs: { level: string; args: any[] }[] = [];
 
 	const customLogger: Logger = {
@@ -189,6 +191,7 @@ Deno.test("Custom Logger - no debug logs when debug disabled", async () => {
 
 Deno.test("Custom Logger - errors are logged via logger", async () => {
 	const factory = new MockWebRtcFactory();
+	// deno-lint-ignore no-explicit-any
 	const logs: { level: string; args: any[] }[] = [];
 
 	const customLogger: Logger = {
@@ -221,14 +224,20 @@ Deno.test("Custom Logger - errors are logged via logger", async () => {
 	const errorLogs = logs.filter((l) => l.level === "error");
 	assertEquals(errorLogs.length > 0, true);
 	// Error logs include the prefix in the message
-	assertEquals(String(errorLogs[0].args[0]).startsWith("[WebRtcManager]"), true);
+	assertEquals(
+		String(errorLogs[0].args[0]).startsWith("[WebRtcManager]"),
+		true
+	);
 });
 
-Deno.test("Default Logger - falls back to console when no logger provided", () => {
-	const factory = new MockWebRtcFactory();
+Deno.test(
+	"Default Logger - falls back to console when no logger provided",
+	() => {
+		const factory = new MockWebRtcFactory();
 
-	// Should not throw when no logger is provided
-	const manager = new WebRtcManager(factory, { debug: true });
+		// Should not throw when no logger is provided
+		const manager = new WebRtcManager(factory, { debug: true });
 
-	assertEquals(manager.state, WebRtcState.IDLE);
-});
+		assertEquals(manager.state, WebRtcState.IDLE);
+	}
+);

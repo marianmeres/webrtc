@@ -24,7 +24,7 @@ interface TestResult {
 	duration?: number;
 }
 
-function assertEquals(actual: any, expected: any, message?: string) {
+function assertEquals(actual: unknown, expected: unknown, message?: string) {
 	if (actual !== expected) {
 		throw new Error(message || `Expected ${expected}, but got ${actual}`);
 	}
