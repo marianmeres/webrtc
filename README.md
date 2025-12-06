@@ -51,6 +51,7 @@ const manager = new WebRtcManager(factory, config);
 - `autoReconnect`: Enable automatic reconnection (default: false)
 - `maxReconnectAttempts`: Max reconnection attempts (default: 5)
 - `reconnectDelay`: Initial reconnection delay in ms (default: 1000)
+- `fullReconnectTimeout`: Timeout in ms for full reconnection to succeed (default: 30000)
 - `shouldReconnect`: Callback to control whether reconnection should proceed (see below)
 - `debug`: Enable debug logging (default: false)
 - `logger`: Custom logger instance implementing `Logger` interface (default: console)
@@ -160,6 +161,39 @@ The callback receives:
 - `attempt`: Current reconnection attempt (1-based)
 - `maxAttempts`: Configured maximum attempts
 - `strategy`: `"ice-restart"` (attempts 1-2) or `"full"` (attempts 3+)
+
+### Reconnection Strategies
+
+The manager uses two reconnection strategies with exponential backoff:
+
+1. **ICE Restart** (attempts 1-2): Lightweight reconnection that keeps the existing peer connection and restarts ICE negotiation. Works when the network path changed but the remote peer is still available.
+
+2. **Full Reconnection** (attempts 3+): Creates a completely new peer connection. This is necessary when ICE restart fails, but **requires consumer action** to complete the signaling handshake.
+
+#### Handling Full Reconnection
+
+When a full reconnection is triggered, the manager will:
+1. Clean up the old peer connection
+2. Create a new peer connection
+3. Emit `EVENT_RECONNECTING` with `strategy: 'full'`
+
+**Important:** The manager cannot automatically complete the signaling handshake for full reconnections. You must listen for the `reconnecting` event and re-establish signaling when the strategy is `'full'`:
+
+```typescript
+manager.on(WebRtcManager.EVENT_RECONNECTING, async ({ attempt, strategy }) => {
+  console.log(`Reconnecting (attempt ${attempt}, strategy: ${strategy})`);
+
+  if (strategy === 'full') {
+    // Re-do the signaling handshake
+    const offer = await manager.createOffer();
+    await manager.setLocalDescription(offer);
+    signalingChannel.send({ type: 'offer', offer });
+  }
+  // For 'ice-restart', the manager handles it automatically
+});
+```
+
+If the full reconnection doesn't reach `CONNECTED` state within `fullReconnectTimeout` (default: 30 seconds), it's treated as a failed attempt and the next reconnection attempt begins (or `EVENT_RECONNECT_FAILED` is emitted if max attempts reached).
 
 ## Examples
 

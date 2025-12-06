@@ -31,6 +31,8 @@ export interface WebRtcManagerConfig {
 	maxReconnectAttempts?: number;
 	/** Initial reconnection delay in ms. Doubles with each attempt. Defaults to 1000. */
 	reconnectDelay?: number;
+	/** Timeout in ms for full reconnection strategy to reach connected state. Defaults to 30000. */
+	fullReconnectTimeout?: number;
 	/**
 	 * Callback to determine whether reconnection should be attempted.
 	 * Called before each reconnection attempt when autoReconnect is enabled.

@@ -99,6 +99,7 @@ export class WebRtcManager {
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
 	#reconnectAttempts: number = 0;
 	#reconnectTimer: number | null = null;
+	#fullReconnectTimeoutTimer: number | null = null;
 	#deviceChangeHandler: (() => void) | null = null;
 
 	/**
@@ -830,8 +831,12 @@ export class WebRtcManager {
 			const state = this.#pc!.connectionState;
 			this.#debug("Connection state changed:", state);
 			if (state === "connected") {
-				// Connection successful - reset reconnect attempts
+				// Connection successful - reset reconnect attempts and clear any pending timeout
 				this.#reconnectAttempts = 0;
+				if (this.#fullReconnectTimeoutTimer !== null) {
+					clearTimeout(this.#fullReconnectTimeoutTimer);
+					this.#fullReconnectTimeoutTimer = null;
+				}
 				this.#dispatch(WebRtcFsmEvent.CONNECTED);
 			} else if (state === "failed") {
 				// Connection failed - attempt reconnection if enabled
@@ -882,6 +887,12 @@ export class WebRtcManager {
 		if (this.#reconnectTimer !== null) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = null;
+		}
+
+		// Clear any pending full reconnection timeout
+		if (this.#fullReconnectTimeoutTimer !== null) {
+			clearTimeout(this.#fullReconnectTimeoutTimer);
+			this.#fullReconnectTimeoutTimer = null;
 		}
 
 		// Remove device change listener
@@ -1017,7 +1028,20 @@ export class WebRtcManager {
 					this.#cleanup();
 					this.#dispatch(WebRtcFsmEvent.RESET);
 					await this.connect();
-					// If successful, onconnectionstatechange will reset attempts
+
+					// Start timeout for full reconnection - if connection doesn't succeed
+					// within the timeout, treat it as a failure
+					const timeout = this.#config.fullReconnectTimeout ?? 30000;
+					this.#fullReconnectTimeoutTimer = setTimeout(() => {
+						this.#fullReconnectTimeoutTimer = null;
+						// Only trigger failure if still not connected
+						if (this.state !== WebRtcState.CONNECTED) {
+							this.#debug(
+								"Full reconnection timeout reached, connection not established"
+							);
+							this.#handleConnectionFailure();
+						}
+					}, timeout) as unknown as number;
 				} catch (e) {
 					this.#logger.error("[WebRtcManager] Reconnection failed:", e);
 					this.#handleConnectionFailure();

@@ -759,6 +759,9 @@ interface WebRtcManagerConfig {
   /** Initial reconnection delay in ms (doubles each attempt). Default: 1000 */
   reconnectDelay?: number;
 
+  /** Timeout in ms for full reconnection to reach connected state. Default: 30000 */
+  fullReconnectTimeout?: number;
+
   /** Callback to control whether reconnection should proceed */
   shouldReconnect?: (context: {
     attempt: number;
@@ -942,18 +945,23 @@ When `autoReconnect: true`:
 2. **Attempts 3+:** Full reconnection (new peer connection)
 3. **Backoff:** `reconnectDelay * 2^(attempt-1)` milliseconds
 
-For "full" strategy reconnections, listen for the `reconnecting` event and re-perform signaling:
+#### Full Reconnection and Signaling
+
+**Important:** For "full" strategy reconnections, the manager creates a new peer connection but **cannot automatically complete the signaling handshake**. You must listen for the `reconnecting` event and re-perform signaling when `strategy === 'full'`:
 
 ```typescript
-manager.on('reconnecting', ({ attempt, strategy }) => {
+manager.on('reconnecting', async ({ attempt, strategy }) => {
   if (strategy === 'full') {
     // Re-do offer/answer exchange
     const offer = await manager.createOffer();
     await manager.setLocalDescription(offer);
     sendToRemote(offer);
   }
+  // For 'ice-restart', the manager handles it automatically
 });
 ```
+
+If the connection doesn't reach `CONNECTED` state within `fullReconnectTimeout` (default: 30 seconds), it's treated as a failed attempt and the next reconnection attempt begins. When all attempts are exhausted, `EVENT_RECONNECT_FAILED` is emitted.
 
 ### Conditional Reconnection
 
