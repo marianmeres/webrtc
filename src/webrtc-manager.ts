@@ -952,6 +952,23 @@ export class WebRtcManager {
 			return;
 		}
 
+		// Determine strategy for this attempt (next attempt number is current + 1)
+		const nextAttempt = this.#reconnectAttempts + 1;
+		const strategy = nextAttempt <= 2 ? "ice-restart" : "full";
+
+		// Check shouldReconnect callback if provided
+		if (this.#config.shouldReconnect) {
+			const shouldProceed = this.#config.shouldReconnect?.({
+				attempt: nextAttempt,
+				maxAttempts,
+				strategy,
+			});
+			if (!shouldProceed) {
+				this.#debug("Reconnection suppressed by shouldReconnect callback");
+				return;
+			}
+		}
+
 		// Transition to RECONNECTING state
 		this.#dispatch(WebRtcFsmEvent.RECONNECTING);
 

@@ -31,6 +31,20 @@ export interface WebRtcManagerConfig {
 	maxReconnectAttempts?: number;
 	/** Initial reconnection delay in ms. Doubles with each attempt. Defaults to 1000. */
 	reconnectDelay?: number;
+	/**
+	 * Callback to determine whether reconnection should be attempted.
+	 * Called before each reconnection attempt when autoReconnect is enabled.
+	 * Return false to suppress reconnection (e.g., when peer disconnected intentionally).
+	 * If not provided, reconnection proceeds automatically up to maxReconnectAttempts.
+	 */
+	shouldReconnect?: (context: {
+		/** Current reconnection attempt number (1-based) */
+		attempt: number;
+		/** Maximum configured reconnection attempts */
+		maxAttempts: number;
+		/** Strategy that will be used: "ice-restart" for first attempts, "full" for later */
+		strategy: "ice-restart" | "full";
+	}) => boolean;
 	/** Enable debug logging. Defaults to false. */
 	debug?: boolean;
 	/** Custom logger instance. If not provided, falls back to console. */

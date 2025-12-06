@@ -51,6 +51,7 @@ const manager = new WebRtcManager(factory, config);
 - `autoReconnect`: Enable automatic reconnection (default: false)
 - `maxReconnectAttempts`: Max reconnection attempts (default: 5)
 - `reconnectDelay`: Initial reconnection delay in ms (default: 1000)
+- `shouldReconnect`: Callback to control whether reconnection should proceed (see below)
 - `debug`: Enable debug logging (default: false)
 - `logger`: Custom logger instance implementing `Logger` interface (default: console)
 
@@ -128,6 +129,37 @@ const unsub = manager.subscribe((state) => {
 - `EVENT_DEVICE_CHANGED`
 - `EVENT_MICROPHONE_FAILED`
 - `EVENT_ERROR`
+
+### Controlling Reconnection
+
+When `autoReconnect` is enabled, you can use the `shouldReconnect` callback to conditionally suppress reconnection attempts. This is useful when the remote peer disconnected intentionally (e.g., left the call) rather than due to network failure.
+
+```typescript
+let peerLeftIntentionally = false;
+
+const manager = new WebRtcManager(factory, {
+  autoReconnect: true,
+  shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
+    if (peerLeftIntentionally) {
+      return false; // Don't reconnect
+    }
+    return true;
+  },
+});
+
+// Listen for "goodbye" message from peer before they disconnect
+manager.on(WebRtcManager.EVENT_DATA_CHANNEL_MESSAGE, ({ data }) => {
+  const msg = JSON.parse(data);
+  if (msg.type === 'bye') {
+    peerLeftIntentionally = true;
+  }
+});
+```
+
+The callback receives:
+- `attempt`: Current reconnection attempt (1-based)
+- `maxAttempts`: Configured maximum attempts
+- `strategy`: `"ice-restart"` (attempts 1-2) or `"full"` (attempts 3+)
 
 ## Examples
 

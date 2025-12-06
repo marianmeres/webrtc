@@ -759,6 +759,13 @@ interface WebRtcManagerConfig {
   /** Initial reconnection delay in ms (doubles each attempt). Default: 1000 */
   reconnectDelay?: number;
 
+  /** Callback to control whether reconnection should proceed */
+  shouldReconnect?: (context: {
+    attempt: number;
+    maxAttempts: number;
+    strategy: "ice-restart" | "full";
+  }) => boolean;
+
   /** Enable debug logging. Default: false */
   debug?: boolean;
 
@@ -947,3 +954,31 @@ manager.on('reconnecting', ({ attempt, strategy }) => {
   }
 });
 ```
+
+### Conditional Reconnection
+
+Use the `shouldReconnect` callback to suppress reconnection when the peer disconnected intentionally:
+
+```typescript
+let peerLeftIntentionally = false;
+
+const manager = new WebRtcManager(factory, {
+  autoReconnect: true,
+  shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
+    // Return false to suppress reconnection
+    return !peerLeftIntentionally;
+  },
+});
+
+// Track intentional disconnects via data channel
+manager.on('data_channel_message', ({ data }) => {
+  if (JSON.parse(data).type === 'bye') {
+    peerLeftIntentionally = true;
+  }
+});
+```
+
+The callback receives:
+- `attempt`: Current attempt number (1-based)
+- `maxAttempts`: Configured maximum attempts
+- `strategy`: `"ice-restart"` or `"full"`
