@@ -1013,6 +1013,9 @@ export class WebRtcManager {
 				// perform the signaling handshake (create offer/answer exchange) to
 				// complete the reconnection.
 				try {
+					// Clean up old connection and reset to IDLE so connect() creates a new PC
+					this.#cleanup();
+					this.#dispatch(WebRtcFsmEvent.RESET);
 					await this.connect();
 					// If successful, onconnectionstatechange will reset attempts
 				} catch (e) {
