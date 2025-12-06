@@ -64,6 +64,7 @@ export class MockRTCDataChannel extends EventTarget {
 		this.label = label;
 	}
 
+	// deno-lint-ignore no-explicit-any
 	send(data: any) {
 		// no-op
 	}
