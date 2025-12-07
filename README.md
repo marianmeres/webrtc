@@ -459,24 +459,31 @@ Mock-based tests for the manager's logic and state transitions:
 deno task test
 ```
 
-### Browser Integration Tests
+### Interactive Example
 
-Real peer-to-peer connection tests running in a browser environment:
+The `example/` directory contains a working demo of two peers communicating via WebRTC data channels:
 
 ```bash
-deno task test:browser
+# Build the example bundle
+deno task example:build
+
+# Serve the example directory
+cd example && deno run -A jsr:@std/http/file-server
 ```
 
-This builds the test bundle and starts a local server. Open the provided URL in your browser to run the tests interactively.
+Then open `http://localhost:8000/` in your browser.
 
-The browser tests verify:
-- Actual P2P connections between peers
-- Data channel message exchange
+**Structure:**
+- `index.html` - Parent page with two side-by-side iframes, acts as signaling relay via `postMessage`
+- `peer1.html` - The "offerer" peer (click "Connect" to initiate)
+- `peer2.html` - The "answerer" peer (waits for connection)
+
+This example demonstrates:
+- P2P connection establishment without a signaling server (uses `postMessage` between iframes)
+- SDP offer/answer exchange
 - ICE candidate exchange
-- Connection state transitions
-- Resource cleanup
-
-See [tests/browser/README.md](tests/browser/README.md) for more details.
+- Data channel creation and message passing
+- State change monitoring
 
 ## License
 

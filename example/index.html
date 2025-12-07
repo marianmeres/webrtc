@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>WebRTC DataChannel Demo</title>
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		html, body { height: 100%; }
+		.container { display: flex; height: 100%; }
+		iframe { flex: 1; border: none; border-right: 1px solid #ccc; }
+		iframe:last-child { border-right: none; }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<iframe id="peer1" src="peer1.html"></iframe>
+		<iframe id="peer2" src="peer2.html"></iframe>
+	</div>
+	<script>
+		// Parent acts as signaling relay between the two iframes
+		const peer1Frame = document.getElementById('peer1');
+		const peer2Frame = document.getElementById('peer2');
+
+		window.addEventListener('message', (event) => {
+			const { from, to, type, payload } = event.data;
+			if (!from || !to || !type) return;
+
+			const targetFrame = to === 'peer2' ? peer2Frame : peer1Frame;
+			targetFrame.contentWindow.postMessage({ from, type, payload }, '*');
+		});
+	</script>
+</body>
+</html>
