@@ -31,8 +31,14 @@ The main class for managing WebRTC connections.
 ### Constructor
 
 ```typescript
-new WebRtcManager(factory: WebRtcFactory, config?: WebRtcManagerConfig)
+new WebRtcManager<TContext = unknown>(factory: WebRtcFactory, config?: WebRtcManagerConfig)
 ```
+
+**Type Parameters:**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| TContext | `unknown` | Type for the `context` property |
 
 **Parameters:**
 
@@ -120,6 +126,33 @@ get peerConnection(): RTCPeerConnection | null
 Returns the underlying RTCPeerConnection, or `null` if not initialized.
 
 **Returns:** `RTCPeerConnection | null`
+
+---
+
+#### context
+
+```typescript
+context: TContext | null
+```
+
+User-defined context object for storing arbitrary data associated with this manager. The class accepts an optional generic type parameter for type-safe context access.
+
+**Type Parameter:** `TContext` - The type of the context object (default: `unknown`)
+
+**Default:** `null`
+
+**Example:**
+
+```typescript
+// With type parameter for full type safety:
+const manager = new WebRtcManager<{ audioStream: MediaStream; sessionId: string }>(factory);
+manager.context = { audioStream: myStream, sessionId: '123' };
+manager.context.audioStream; // typed as MediaStream
+
+// Without type parameter (backwards compatible):
+const manager = new WebRtcManager(factory);
+manager.context = { anything: 'goes' };
+```
 
 ---
 

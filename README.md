@@ -38,8 +38,10 @@ The manager doesn't handle the signaling transport layer - you're responsible fo
 ### Constructor
 
 ```typescript
-const manager = new WebRtcManager(factory, config);
+const manager = new WebRtcManager<TContext>(factory, config);
 ```
+
+- `TContext`: Optional type parameter for the `context` property (default: `unknown`)
 
 - `factory`: Object implementing `WebRtcFactory` interface (provides `createPeerConnection`, `getUserMedia`, `enumerateDevices`)
 - `config`: Optional configuration object
@@ -64,6 +66,7 @@ manager.localStream           // MediaStream | null
 manager.remoteStream          // MediaStream | null
 manager.dataChannels          // ReadonlyMap<string, RTCDataChannel>
 manager.peerConnection        // RTCPeerConnection | null
+manager.context               // TContext | null - user-defined data
 ```
 
 ### Lifecycle Methods

@@ -62,7 +62,7 @@ const createDefaultLogger = (): Logger => ({
  * await manager.setLocalDescription(offer);
  * ```
  */
-export class WebRtcManager {
+export class WebRtcManager<TContext = unknown> {
 	/** Event emitted when connection state changes. Payload: {@link WebRtcState} */
 	static readonly EVENT_STATE_CHANGE = "state_change";
 	/** Event emitted when local media stream changes. Payload: `MediaStream | null` */
@@ -98,6 +98,25 @@ export class WebRtcManager {
 	#remoteStream: MediaStream | null = null;
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
 	#reconnectAttempts: number = 0;
+
+	/**
+	 * User-defined context object for storing arbitrary data associated with this manager.
+	 * Useful for attaching application-specific state (e.g., audio streams, metadata)
+	 * without modifying the manager internals.
+	 *
+	 * @example
+	 * ```typescript
+	 * // With type parameter for full type safety:
+	 * const manager = new WebRtcManager<{ audioStream: MediaStream; sessionId: string }>(factory);
+	 * manager.context = { audioStream: myStream, sessionId: '123' };
+	 * manager.context.audioStream; // typed as MediaStream
+	 *
+	 * // Without type parameter (backwards compatible):
+	 * const manager = new WebRtcManager(factory);
+	 * manager.context = { anything: 'goes' };
+	 * ```
+	 */
+	context: TContext | null = null;
 	#reconnectTimer: number | null = null;
 	#fullReconnectTimeoutTimer: number | null = null;
 	#deviceChangeHandler: (() => void) | null = null;

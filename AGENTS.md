@@ -114,8 +114,10 @@ ERROR         --RESET-->       IDLE
 ### Constructor
 
 ```typescript
-new WebRtcManager(factory: WebRtcFactory, config?: WebRtcManagerConfig)
+new WebRtcManager<TContext = unknown>(factory: WebRtcFactory, config?: WebRtcManagerConfig)
 ```
+
+**Type Parameter:** `TContext` - Optional type for the `context` property (default: `unknown`)
 
 ### Logger Interface
 
@@ -166,6 +168,7 @@ interface WebRtcManagerConfig {
 | remoteStream | MediaStream \| null | Remote audio stream |
 | dataChannels | ReadonlyMap<string, RTCDataChannel> | Active data channels |
 | peerConnection | RTCPeerConnection \| null | Underlying connection |
+| context | TContext \| null | User-defined context for arbitrary data |
 
 ### Lifecycle Methods
 
