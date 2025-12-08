@@ -8,7 +8,7 @@
 		h2 { margin-bottom: 1rem; color: #333; }
 		#status { margin-bottom: 1rem; padding: 0.5rem; background: #f0f0f0; }
 		#log { height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 0.5rem; margin-bottom: 1rem; font-size: 0.85rem; }
-		.controls { display: flex; gap: 0.5rem; }
+		.controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 		input { flex: 1; padding: 0.5rem; }
 		button { padding: 0.5rem 1rem; cursor: pointer; }
 	</style>
@@ -21,18 +21,17 @@
 		<input type="text" id="message" placeholder="Type a message...">
 		<button id="send">Send</button>
 	</div>
+	<div class="controls">
+		<button id="beep" disabled>Send Beep</button>
+	</div>
+	<audio id="remoteAudio" autoplay></audio>
 
 	<script type="module">
 		import { WebRtcManager } from './dist/webrtc.js';
-
-		const factory = {
-			createPeerConnection: (config) => new RTCPeerConnection(config),
-			getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-			enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
-		};
+		import { factory, peerConfig, setupBidirectionalAudio, sendBeep, createLogger } from './peer.js';
 
 		const manager = new WebRtcManager(factory, {
-			peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+			peerConfig,
 			debug: true,
 		});
 
@@ -40,18 +39,17 @@
 		const logEl = document.getElementById('log');
 		const messageInput = document.getElementById('message');
 		const sendBtn = document.getElementById('send');
+		const beepBtn = document.getElementById('beep');
+		const remoteAudio = document.getElementById('remoteAudio');
 
-		function log(msg) {
-			const line = document.createElement('div');
-			line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-			logEl.appendChild(line);
-			logEl.scrollTop = logEl.scrollHeight;
-		}
+		const log = createLogger(logEl);
 
 		// Listen for state changes
 		manager.on('state_change', (state) => {
 			statusEl.textContent = `Status: ${state}`;
 			log(`State: ${state}`);
+			// Enable beep button when connected
+			beepBtn.disabled = state !== 'CONNECTED';
 		});
 
 		// Listen for data channel messages
@@ -61,6 +59,27 @@
 
 		manager.on('data_channel_open', (channel) => {
 			log(`Data channel "${channel.label}" opened!`);
+		});
+
+		// Listen for remote audio stream
+		manager.on('remote_stream', (stream) => {
+			if (stream) {
+				remoteAudio.srcObject = stream;
+				log('Playing received audio!');
+			}
+		});
+
+		// Setup audio receiver when connected
+		manager.on('state_change', (state) => {
+			if (state === 'CONNECTED') {
+				const pc = manager.peerConnection;
+				// Use the last audio transceiver (the one from negotiation)
+				const audioTransceivers = pc.getTransceivers().filter(t => t.receiver.track?.kind === 'audio');
+				const transceiver = audioTransceivers[audioTransceivers.length - 1];
+				if (transceiver && transceiver.receiver.track) {
+					remoteAudio.srcObject = new MediaStream([transceiver.receiver.track]);
+				}
+			}
 		});
 
 		// Send ICE candidates to peer1 via parent
@@ -86,6 +105,9 @@
 				await manager.connect();
 				await manager.setRemoteDescription(payload);
 
+				// Ensure bidirectional audio so peer2 can also send beeps
+				setupBidirectionalAudio(manager.peerConnection);
+
 				const answer = await manager.createAnswer();
 				await manager.setLocalDescription(answer);
 
@@ -100,6 +122,19 @@
 			} else if (type === 'ice-candidate') {
 				await manager.addIceCandidate(payload);
 			}
+		});
+
+		// Send beep button - sends audio via WebRTC media track
+		beepBtn.addEventListener('click', () => {
+			const pc = manager.peerConnection;
+			if (!pc) {
+				log('Not connected');
+				return;
+			}
+
+			log('Sending beep...');
+			sendBeep(pc, 880, 1000); // Higher pitch to distinguish from peer1
+			log('Beep sent!');
 		});
 
 		// Send message button

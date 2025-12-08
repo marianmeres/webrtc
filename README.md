@@ -461,7 +461,7 @@ deno task test
 
 ### Interactive Example
 
-The `example/` directory contains a working demo of two peers communicating via WebRTC data channels:
+The `example/` directory contains a working demo of two peers communicating via WebRTC data channels and audio streams:
 
 ```bash
 # Build the example bundle
@@ -477,12 +477,14 @@ Then open `http://localhost:8000/` in your browser.
 - `index.html` - Parent page with two side-by-side iframes, acts as signaling relay via `postMessage`
 - `peer1.html` - The "offerer" peer (click "Connect" to initiate)
 - `peer2.html` - The "answerer" peer (waits for connection)
+- `peer.js` - Shared utilities (factory, beep generation, logging)
 
 This example demonstrates:
 - P2P connection establishment without a signaling server (uses `postMessage` between iframes)
-- SDP offer/answer exchange
+- SDP offer/answer exchange with bidirectional audio setup
 - ICE candidate exchange
 - Data channel creation and message passing
+- **Audio streaming via WebRTC media tracks** (click "Send Beep" to transmit generated audio)
 - State change monitoring
 
 ## License
