@@ -41,6 +41,7 @@ Deno.test("Audio Handling", async () => {
 	// Enable microphone
 	await manager.enableMicrophone(true);
 	assertExists(localStream);
+	// deno-lint-ignore no-explicit-any
 	assertEquals((localStream as any).getAudioTracks().length, 1);
 
 	// Disable microphone
@@ -101,6 +102,7 @@ Deno.test("Data Channel", async () => {
 	assertExists(dc);
 
 	// Trigger open
+	// deno-lint-ignore no-explicit-any
 	(dc as any).dispatchEvent(new Event("open")); // The mock extends EventTarget but we need to ensure onopen is called.
 	// The mock implementation of EventTarget might not call the onopen property automatically unless we implement it.
 	// Let's check our MockRTCDataChannel implementation.
@@ -109,6 +111,7 @@ Deno.test("Data Channel", async () => {
 	// But our WebRtcManager sets dc.onopen = ...
 	// So if we call dc.onopen(), it should work.
 
+	// deno-lint-ignore no-explicit-any
 	if (dc!.onopen) dc!.onopen(new Event("open") as any);
 	assertEquals(dcOpen, true);
 

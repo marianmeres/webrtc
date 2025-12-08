@@ -620,6 +620,7 @@ export class WebRtcManager<TContext = unknown> {
 			return false;
 		}
 		try {
+			// deno-lint-ignore no-explicit-any
 			channel.send(data as any);
 			return true;
 		} catch (e) {
@@ -833,6 +834,18 @@ export class WebRtcManager<TContext = unknown> {
 		if (this.#config.debug) {
 			this.#logger.debug("[WebRtcManager]", ...args);
 		}
+	}
+
+	// deno-lint-ignore no-explicit-any
+	#log(...args: any[]) {
+		if (this.#config.debug) {
+			this.#logger.log("[WebRtcManager]", ...args);
+		}
+	}
+
+	// deno-lint-ignore no-explicit-any
+	#warn(...args: any[]) {
+		this.#logger.warn("[WebRtcManager]", ...args);
 	}
 
 	// deno-lint-ignore no-explicit-any
