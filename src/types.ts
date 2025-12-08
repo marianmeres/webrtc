@@ -155,3 +155,14 @@ export interface WebRtcEvents {
 	/** Emitted when an error occurs. Payload: the Error object. */
 	error: Error;
 }
+
+/**
+ * Options for waiting for ICE gathering to complete.
+ * Used with gatherIceCandidates() for HTTP POST signaling patterns.
+ */
+export interface GatherIceCandidatesOptions {
+	/** Timeout in milliseconds (default: 10000) */
+	timeout?: number;
+	/** Called for each ICE candidate as it's gathered */
+	onCandidate?: (candidate: RTCIceCandidate | null) => void;
+}

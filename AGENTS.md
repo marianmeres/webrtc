@@ -159,6 +159,15 @@ interface WebRtcManagerConfig {
 }
 ```
 
+### GatherIceCandidatesOptions Interface
+
+```typescript
+interface GatherIceCandidatesOptions {
+  timeout?: number;                                    // Timeout in ms (default: 10000)
+  onCandidate?: (candidate: RTCIceCandidate | null) => void;  // Called for each candidate
+}
+```
+
 ### Properties (Getters)
 
 | Property | Type | Description |
@@ -205,6 +214,7 @@ interface WebRtcManagerConfig {
 | setRemoteDescription | `(description: RTCSessionDescriptionInit): Promise<boolean>` | Set remote SDP |
 | addIceCandidate | `(candidate: RTCIceCandidateInit \| null): Promise<boolean>` | Add ICE candidate |
 | iceRestart | `(): Promise<boolean>` | Perform ICE restart |
+| gatherIceCandidates | `(options?: GatherIceCandidatesOptions): Promise<void>` | Wait for ICE gathering to complete |
 | getLocalDescription | `(): RTCSessionDescription \| null` | Get local SDP |
 | getRemoteDescription | `(): RTCSessionDescription \| null` | Get remote SDP |
 | getStats | `(): Promise<RTCStatsReport \| null>` | Get connection statistics |

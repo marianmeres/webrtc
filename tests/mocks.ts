@@ -86,6 +86,9 @@ export class MockRTCPeerConnection extends EventTarget {
 	#senders: RTCRtpSender[] = [];
 	#transceivers: RTCRtpTransceiver[] = [];
 	#dataChannels: MockRTCDataChannel[] = [];
+	// deno-lint-ignore no-explicit-any
+	#iceCandidateListeners: ((e: any) => void)[] = [];
+	#iceGatheringStateListeners: (() => void)[] = [];
 
 	constructor(config?: RTCConfiguration) {
 		super();
@@ -172,6 +175,52 @@ export class MockRTCPeerConnection extends EventTarget {
 		this.connectionState = "closed";
 		this.signalingState = "closed";
 		this.#dataChannels.forEach((c) => c.close());
+	}
+
+	// deno-lint-ignore no-explicit-any
+	override addEventListener(type: string, listener: any) {
+		if (type === "icecandidate") {
+			this.#iceCandidateListeners.push(listener);
+		} else if (type === "icegatheringstatechange") {
+			this.#iceGatheringStateListeners.push(listener);
+		}
+		// Call parent for other event types
+		super.addEventListener(type, listener);
+	}
+
+	// deno-lint-ignore no-explicit-any
+	override removeEventListener(type: string, listener: any) {
+		if (type === "icecandidate") {
+			this.#iceCandidateListeners = this.#iceCandidateListeners.filter(
+				(l) => l !== listener
+			);
+		} else if (type === "icegatheringstatechange") {
+			this.#iceGatheringStateListeners = this.#iceGatheringStateListeners.filter(
+				(l) => l !== listener
+			);
+		}
+		// Call parent for other event types
+		super.removeEventListener(type, listener);
+	}
+
+	/**
+	 * Simulate ICE gathering process for testing.
+	 * @param candidates - Array of mock candidates to emit before completion
+	 */
+	simulateIceGathering(candidates: RTCIceCandidate[] = []) {
+		this.iceGatheringState = "gathering";
+		this.#iceGatheringStateListeners.forEach((l) => l());
+
+		// Emit each candidate
+		candidates.forEach((candidate) => {
+			this.#iceCandidateListeners.forEach((l) => l({ candidate }));
+		});
+
+		// Emit null candidate to signal gathering complete
+		this.#iceCandidateListeners.forEach((l) => l({ candidate: null }));
+
+		this.iceGatheringState = "complete";
+		this.#iceGatheringStateListeners.forEach((l) => l());
 	}
 }
 

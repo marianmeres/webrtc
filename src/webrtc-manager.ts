@@ -7,6 +7,7 @@ import {
 	WebRtcState,
 	WebRtcFsmEvent,
 	type WebRtcEvents,
+	type GatherIceCandidatesOptions,
 } from "./types.ts";
 
 /**
@@ -788,6 +789,64 @@ export class WebRtcManager<TContext = unknown> {
 			this.#handleError(e);
 			return false;
 		}
+	}
+
+	/**
+	 * Wait for ICE gathering to complete.
+	 * Use this for HTTP POST signaling patterns where you need all ICE candidates
+	 * bundled in the local description before sending to the server.
+	 * @param options - Optional configuration for timeout and candidate callback.
+	 */
+	gatherIceCandidates(
+		options: GatherIceCandidatesOptions = {}
+	): Promise<void> {
+		const { timeout = 10000, onCandidate } = options;
+
+		if (!this.#pc) {
+			return Promise.reject(new Error("Peer connection not initialized"));
+		}
+
+		const pc = this.#pc;
+
+		if (pc.iceGatheringState === "complete") {
+			this.#logDebug("ICE gathering already complete");
+			return Promise.resolve();
+		}
+
+		this.#logDebug("Waiting for ICE gathering to complete...");
+
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				cleanup();
+				reject(new Error("ICE gathering timeout"));
+			}, timeout);
+
+			const cleanup = () => {
+				clearTimeout(timer);
+				pc.removeEventListener("icegatheringstatechange", checkState);
+				pc.removeEventListener("icecandidate", handleCandidate);
+			};
+
+			const checkState = () => {
+				if (pc.iceGatheringState === "complete") {
+					this.#logDebug("ICE gathering complete (via state change)");
+					cleanup();
+					resolve();
+				}
+			};
+
+			const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
+				onCandidate?.(event.candidate);
+				if (event.candidate === null) {
+					this.#logDebug("ICE gathering complete (null candidate)");
+					cleanup();
+					resolve();
+				}
+			};
+
+			pc.addEventListener("icegatheringstatechange", checkState);
+			pc.addEventListener("icecandidate", handleCandidate);
+		});
 	}
 
 	/**

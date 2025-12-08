@@ -95,6 +95,35 @@ await manager.setLocalDescription(offer)
 await manager.setRemoteDescription(answer)
 await manager.addIceCandidate(candidate)
 await manager.iceRestart()                     // Trigger ICE restart
+await manager.gatherIceCandidates(options)     // Wait for ICE gathering to complete
+```
+
+### gatherIceCandidates(options?)
+
+Wait for ICE gathering to complete. Useful for HTTP POST signaling patterns where you need all ICE candidates bundled in the local description before sending to the server.
+
+**Options:** `timeout` (ms, default 10000), `onCandidate` (callback for each candidate)
+
+```typescript
+const offer = await manager.createOffer();
+await manager.setLocalDescription(offer);
+await manager.gatherIceCandidates({ timeout: 5000 });
+// Now manager.peerConnection.localDescription has all ICE candidates bundled
+```
+
+**Error Handling:** A timeout rejection does *not* transition the FSM to ERROR state. This is intentional - `gatherIceCandidates()` is a utility method, and a timeout means "gathering didn't complete in time", not "the connection failed". The consumer decides how to handle it:
+
+```typescript
+try {
+  await manager.gatherIceCandidates({ timeout: 5000 });
+} catch (e) {
+  if (e.message === "ICE gathering timeout") {
+    // Options:
+    // 1. Retry with longer timeout
+    // 2. Proceed anyway - localDescription may have partial candidates
+    // 3. Treat as fatal: manager.reset()
+  }
+}
 ```
 
 ### Data Channel Methods

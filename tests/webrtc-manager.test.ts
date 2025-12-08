@@ -1,7 +1,7 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { WebRtcManager } from "../src/webrtc-manager.ts";
 import { WebRtcState, type Logger } from "../src/types.ts";
-import { MockWebRtcFactory } from "./mocks.ts";
+import { MockWebRtcFactory, MockRTCPeerConnection } from "./mocks.ts";
 
 Deno.test("Initial State", () => {
 	const factory = new MockWebRtcFactory();
@@ -244,3 +244,97 @@ Deno.test(
 		assertEquals(manager.state, WebRtcState.IDLE);
 	}
 );
+
+// --- gatherIceCandidates tests ---
+
+Deno.test("gatherIceCandidates - resolves when gathering complete", async () => {
+	const factory = new MockWebRtcFactory();
+	const manager = new WebRtcManager(factory);
+
+	await manager.initialize();
+
+	// Get the mock peer connection
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+
+	// Start gathering and simulate completion
+	const gatherPromise = manager.gatherIceCandidates();
+
+	// Simulate ICE gathering completion
+	pc.simulateIceGathering();
+
+	// Should resolve without error
+	await gatherPromise;
+});
+
+Deno.test("gatherIceCandidates - calls onCandidate for each candidate", async () => {
+	const factory = new MockWebRtcFactory();
+	const manager = new WebRtcManager(factory);
+
+	await manager.initialize();
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+
+	// deno-lint-ignore no-explicit-any
+	const candidates: (RTCIceCandidate | null)[] = [];
+	const mockCandidate1 = { candidate: "candidate1" } as RTCIceCandidate;
+	const mockCandidate2 = { candidate: "candidate2" } as RTCIceCandidate;
+
+	const gatherPromise = manager.gatherIceCandidates({
+		onCandidate: (candidate) => {
+			candidates.push(candidate);
+		},
+	});
+
+	// Simulate ICE gathering with candidates
+	pc.simulateIceGathering([mockCandidate1, mockCandidate2]);
+
+	await gatherPromise;
+
+	// Should have received all candidates plus null
+	assertEquals(candidates.length, 3);
+	assertEquals(candidates[0], mockCandidate1);
+	assertEquals(candidates[1], mockCandidate2);
+	assertEquals(candidates[2], null);
+});
+
+Deno.test("gatherIceCandidates - throws on timeout", async () => {
+	const factory = new MockWebRtcFactory();
+	const manager = new WebRtcManager(factory);
+
+	await manager.initialize();
+
+	// Use a very short timeout and don't simulate gathering completion
+	await assertRejects(
+		() => manager.gatherIceCandidates({ timeout: 50 }),
+		Error,
+		"ICE gathering timeout"
+	);
+});
+
+Deno.test("gatherIceCandidates - resolves immediately if already complete", async () => {
+	const factory = new MockWebRtcFactory();
+	const manager = new WebRtcManager(factory);
+
+	await manager.initialize();
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+
+	// Set state to complete before calling gatherIceCandidates
+	pc.iceGatheringState = "complete";
+
+	// Should resolve immediately
+	await manager.gatherIceCandidates();
+});
+
+Deno.test("gatherIceCandidates - throws if peer connection not initialized", async () => {
+	const factory = new MockWebRtcFactory();
+	const manager = new WebRtcManager(factory);
+
+	// Don't initialize - peer connection is null
+
+	await assertRejects(
+		() => manager.gatherIceCandidates(),
+		Error,
+		"Peer connection not initialized"
+	);
+});
