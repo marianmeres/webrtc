@@ -838,9 +838,7 @@ export class WebRtcManager<TContext = unknown> {
 
 	// deno-lint-ignore no-explicit-any
 	#log(...args: any[]) {
-		if (this.#config.debug) {
-			this.#logger.log("[WebRtcManager]", ...args);
-		}
+		this.#logger.log("[WebRtcManager]", ...args);
 	}
 
 	// deno-lint-ignore no-explicit-any
