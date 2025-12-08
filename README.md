@@ -105,6 +105,54 @@ const dc = manager.getDataChannel(label)
 manager.sendData(label, data)                  // Returns boolean
 ```
 
+### Working with External Audio Streams
+
+You might want to keep `enableMicrophone: false` even when your application uses audio. Common scenarios include:
+
+- **Pre-acquired stream**: You may have obtained the audio stream earlier in the application flow (e.g., during a permissions check, in a lobby/waiting room, or for local audio preview before joining)
+- **Custom audio processing**: You want to apply audio effects, noise suppression, or other processing via Web Audio API before transmitting
+- **Multiple sources**: You need to mix audio from multiple sources (microphone + system audio, multiple microphones, background music, etc.)
+- **Fine-grained privacy control**: You want explicit control over exactly when the microphone activates
+- **Testing**: You want to inject synthetic audio (e.g., oscillator tones) for automated testing
+
+To use your own audio stream, access the `peerConnection` directly and add tracks after initialization:
+
+```typescript
+const manager = new WebRtcManager(factory, {
+  peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+  enableMicrophone: false, // We'll handle the audio stream ourselves
+});
+
+// Your pre-acquired or processed audio stream
+const myAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+// Or a processed stream via Web Audio API
+const audioCtx = new AudioContext();
+const source = audioCtx.createMediaStreamSource(myAudioStream);
+const gainNode = audioCtx.createGain();
+gainNode.gain.value = 0.8;
+source.connect(gainNode);
+const destination = audioCtx.createMediaStreamDestination();
+gainNode.connect(destination);
+const processedStream = destination.stream;
+
+// Initialize the manager
+await manager.initialize();
+
+// Add your audio track to the peer connection
+const pc = manager.peerConnection;
+if (pc) {
+  processedStream.getAudioTracks().forEach((track) => {
+    pc.addTrack(track, processedStream);
+  });
+}
+
+// Continue with normal connection flow
+await manager.connect();
+const offer = await manager.createOffer();
+// ...
+```
+
 ### Event Subscription
 
 ```typescript
