@@ -936,13 +936,21 @@ export class WebRtcManager<TContext = unknown> {
 			const state = this.#pc!.connectionState;
 			this.#logDebug("Connection state changed:", state);
 			if (state === "connected") {
-				// Connection successful - reset reconnect attempts and clear any pending timeout
-				this.#reconnectAttempts = 0;
-				if (this.#fullReconnectTimeoutTimer !== null) {
-					clearTimeout(this.#fullReconnectTimeoutTimer);
-					this.#fullReconnectTimeoutTimer = null;
+				// Only dispatch if in CONNECTING state (FSM can handle CONNECTED event)
+				// This guards against late connection success after user has disconnected
+				if (this.state === WebRtcState.CONNECTING) {
+					// Connection successful - reset reconnect attempts and clear any pending timeout
+					this.#reconnectAttempts = 0;
+					if (this.#fullReconnectTimeoutTimer !== null) {
+						clearTimeout(this.#fullReconnectTimeoutTimer);
+						this.#fullReconnectTimeoutTimer = null;
+					}
+					this.#dispatch(WebRtcFsmEvent.CONNECTED);
+				} else {
+					this.#logDebug(
+						`Ignoring late connection success (current state: ${this.state})`
+					);
 				}
-				this.#dispatch(WebRtcFsmEvent.CONNECTED);
 			} else if (state === "failed") {
 				// Connection failed - attempt reconnection if enabled
 				this.#handleConnectionFailure();
