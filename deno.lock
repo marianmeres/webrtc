@@ -2,7 +2,8 @@
   "version": "5",
   "specifiers": {
     "jsr:@luca/esbuild-deno-loader@~0.10.3": "0.10.3",
-    "jsr:@marianmeres/fsm@^2.14.1": "2.14.1",
+    "jsr:@marianmeres/clog@^3.10.0": "3.10.0",
+    "jsr:@marianmeres/fsm@^2.15.0": "2.15.0",
     "jsr:@marianmeres/npmbuild@^1.7.3": "1.7.3",
     "jsr:@marianmeres/pubsub@^2.4.4": "2.4.4",
     "jsr:@std/assert@^1.0.16": "1.0.16",
@@ -24,8 +25,11 @@
         "jsr:@std/path@0.213"
       ]
     },
-    "@marianmeres/fsm@2.14.1": {
-      "integrity": "ae3f6a00646c3db58bbb9ea5d08d9963f5de6f21c59d9413dce2564073eedc4e",
+    "@marianmeres/clog@3.10.0": {
+      "integrity": "94eaf827bc2d1d9d9a5b4c917c632e2b30801fdb55b9cbdc63341d84aca86b40"
+    },
+    "@marianmeres/fsm@2.15.0": {
+      "integrity": "f9c5209fe2ebbafd9d3b7250b4bb6fb1dcb23b90ce519bc59cfc7d50b3202ed6",
       "dependencies": [
         "jsr:@marianmeres/pubsub",
         "jsr:@std/cli"
@@ -277,7 +281,8 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@marianmeres/fsm@^2.14.1",
+      "jsr:@marianmeres/clog@^3.10.0",
+      "jsr:@marianmeres/fsm@^2.15.0",
       "jsr:@marianmeres/npmbuild@^1.7.3",
       "jsr:@marianmeres/pubsub@^2.4.4",
       "jsr:@std/assert@^1.0.16",

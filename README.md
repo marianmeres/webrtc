@@ -23,7 +23,7 @@ npm install @marianmeres/webrtc
 
 ## High-Level Overview
 
-The `WebRtcManager` class handles the complete WebRTC connection lifecycle:
+The `WebRTCManager` class handles the complete WebRTC connection lifecycle:
 
 1. **Initialization**: Sets up RTCPeerConnection, media streams, and data channels
 2. **Connection Management**: Handles state transitions, reconnection, and cleanup
@@ -38,12 +38,12 @@ The manager doesn't handle the signaling transport layer - you're responsible fo
 ### Constructor
 
 ```typescript
-const manager = new WebRtcManager<TContext>(factory, config);
+const manager = new WebRTCManager<TContext>(factory, config);
 ```
 
 - `TContext`: Optional type parameter for the `context` property (default: `unknown`)
 
-- `factory`: Object implementing `WebRtcFactory` interface (provides `createPeerConnection`, `getUserMedia`, `enumerateDevices`)
+- `factory`: Object implementing `WebRTCFactory` interface (provides `createPeerConnection`, `getUserMedia`, `enumerateDevices`)
 - `config`: Optional configuration object
 
 **Configuration Options:**
@@ -55,13 +55,12 @@ const manager = new WebRtcManager<TContext>(factory, config);
 - `reconnectDelay`: Initial reconnection delay in ms (default: 1000)
 - `fullReconnectTimeout`: Timeout in ms for full reconnection to succeed (default: 30000)
 - `shouldReconnect`: Callback to control whether reconnection should proceed (see below)
-- `debug`: Enable debug logging (default: false)
 - `logger`: Custom logger instance implementing `Logger` interface (default: console)
 
 ### State and Properties
 
 ```typescript
-manager.state                 // Current WebRtcState
+manager.state                 // Current WebRTCState
 manager.localStream           // MediaStream | null
 manager.remoteStream          // MediaStream | null
 manager.dataChannels          // ReadonlyMap<string, RTCDataChannel>
@@ -147,7 +146,7 @@ You might want to keep `enableMicrophone: false` even when your application uses
 To use your own audio stream, access the `peerConnection` directly and add tracks after initialization:
 
 ```typescript
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
   enableMicrophone: false, // We'll handle the audio stream ourselves
 });
@@ -186,7 +185,7 @@ const offer = await manager.createOffer();
 
 ```typescript
 // Subscribe to specific event
-const unsub = manager.on(WebRtcManager.EVENT_STATE_CHANGE, (state) => {
+const unsub = manager.on(WebRTCManager.EVENT_STATE_CHANGE, (state) => {
   console.log('State changed:', state);
 });
 
@@ -218,7 +217,7 @@ When `autoReconnect` is enabled, you can use the `shouldReconnect` callback to c
 ```typescript
 let peerLeftIntentionally = false;
 
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   autoReconnect: true,
   shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
     if (peerLeftIntentionally) {
@@ -229,7 +228,7 @@ const manager = new WebRtcManager(factory, {
 });
 
 // Listen for "goodbye" message from peer before they disconnect
-manager.on(WebRtcManager.EVENT_DATA_CHANNEL_MESSAGE, ({ data }) => {
+manager.on(WebRTCManager.EVENT_DATA_CHANNEL_MESSAGE, ({ data }) => {
   const msg = JSON.parse(data);
   if (msg.type === 'bye') {
     peerLeftIntentionally = true;
@@ -260,7 +259,7 @@ When a full reconnection is triggered, the manager will:
 **Important:** The manager cannot automatically complete the signaling handshake for full reconnections. You must listen for the `reconnecting` event and re-establish signaling when the strategy is `'full'`:
 
 ```typescript
-manager.on(WebRtcManager.EVENT_RECONNECTING, async ({ attempt, strategy }) => {
+manager.on(WebRTCManager.EVENT_RECONNECTING, async ({ attempt, strategy }) => {
   console.log(`Reconnecting (attempt ${attempt}, strategy: ${strategy})`);
 
   if (strategy === 'full') {
@@ -280,7 +279,7 @@ If the full reconnection doesn't reach `CONNECTED` state within `fullReconnectTi
 ### Basic Usage (Vanilla JavaScript)
 
 ```typescript
-import { WebRtcManager, WebRtcState } from '@marianmeres/webrtc';
+import { WebRTCManager, WebRTCState } from '@marianmeres/webrtc';
 
 // Create factory (browser implementation)
 const factory = {
@@ -290,7 +289,7 @@ const factory = {
 };
 
 // Create manager
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   peerConfig: {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   },
@@ -299,12 +298,12 @@ const manager = new WebRtcManager(factory, {
 });
 
 // Subscribe to events
-manager.on(WebRtcManager.EVENT_ICE_CANDIDATE, (candidate) => {
+manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
   // Send candidate to remote peer via your signaling channel
   signalingChannel.send({ type: 'candidate', candidate });
 });
 
-manager.on(WebRtcManager.EVENT_REMOTE_STREAM, (stream) => {
+manager.on(WebRTCManager.EVENT_REMOTE_STREAM, (stream) => {
   // Attach remote stream to audio element
   audioElement.srcObject = stream;
 });
@@ -332,7 +331,7 @@ signalingChannel.onmessage = async (msg) => {
 
 ```svelte
 <script>
-  import { WebRtcManager, WebRtcState } from '@marianmeres/webrtc';
+  import { WebRTCManager, WebRTCState } from '@marianmeres/webrtc';
   import { onMount } from 'svelte';
 
   const factory = {
@@ -341,7 +340,7 @@ signalingChannel.onmessage = async (msg) => {
     enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
   };
 
-  const manager = new WebRtcManager(factory, {
+  const manager = new WebRTCManager(factory, {
     peerConfig: {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     },
@@ -356,7 +355,7 @@ signalingChannel.onmessage = async (msg) => {
 
   onMount(() => {
     const unsubDevices = manager.on(
-      WebRtcManager.EVENT_DEVICE_CHANGED,
+      WebRTCManager.EVENT_DEVICE_CHANGED,
       (devs) => devices = devs
     );
 
@@ -398,14 +397,14 @@ signalingChannel.onmessage = async (msg) => {
 ### Complete Peer-to-Peer Example
 
 ```typescript
-import { WebRtcManager } from '@marianmores/webrtc';
+import { WebRTCManager } from '@marianmores/webrtc';
 
 class P2PConnection {
-  manager: WebRtcManager;
+  manager: WebRTCManager;
   signalingChannel: WebSocket;
 
   constructor(signalingUrl: string) {
-    this.manager = new WebRtcManager(
+    this.manager = new WebRTCManager(
       {
         createPeerConnection: (config) => new RTCPeerConnection(config),
         getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
@@ -446,7 +445,7 @@ class P2PConnection {
 
   setupManagerEvents() {
     // Send ICE candidates to remote peer
-    this.manager.on(WebRtcManager.EVENT_ICE_CANDIDATE, (candidate) => {
+    this.manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
       this.signalingChannel.send(JSON.stringify({
         type: 'candidate',
         candidate,
@@ -454,18 +453,18 @@ class P2PConnection {
     });
 
     // Handle remote audio stream
-    this.manager.on(WebRtcManager.EVENT_REMOTE_STREAM, (stream) => {
+    this.manager.on(WebRTCManager.EVENT_REMOTE_STREAM, (stream) => {
       const audio = document.getElementById('remote-audio') as HTMLAudioElement;
       audio.srcObject = stream;
     });
 
     // Handle data channel messages
-    this.manager.on(WebRtcManager.EVENT_DATA_CHANNEL_MESSAGE, ({ data }) => {
+    this.manager.on(WebRTCManager.EVENT_DATA_CHANNEL_MESSAGE, ({ data }) => {
       console.log('Received message:', data);
     });
 
     // Handle reconnection
-    this.manager.on(WebRtcManager.EVENT_RECONNECTING, ({ attempt, strategy }) => {
+    this.manager.on(WebRTCManager.EVENT_RECONNECTING, ({ attempt, strategy }) => {
       console.log(`Reconnecting (attempt ${attempt}, strategy: ${strategy})`);
       if (strategy === 'full') {
         // For full reconnection, we need to re-do the signaling handshake

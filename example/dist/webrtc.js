@@ -1,25 +1,25 @@
-var WebRtcState;
-(function(WebRtcState) {
-    WebRtcState["IDLE"] = "IDLE";
-    WebRtcState["INITIALIZING"] = "INITIALIZING";
-    WebRtcState["CONNECTING"] = "CONNECTING";
-    WebRtcState["CONNECTED"] = "CONNECTED";
-    WebRtcState["RECONNECTING"] = "RECONNECTING";
-    WebRtcState["DISCONNECTED"] = "DISCONNECTED";
-    WebRtcState["ERROR"] = "ERROR";
-})(WebRtcState || (WebRtcState = {}));
-var WebRtcFsmEvent;
-(function(WebRtcFsmEvent) {
-    WebRtcFsmEvent["INIT"] = "initialize";
-    WebRtcFsmEvent["CONNECT"] = "connect";
-    WebRtcFsmEvent["CONNECTED"] = "connected";
-    WebRtcFsmEvent["RECONNECTING"] = "reconnecting";
-    WebRtcFsmEvent["DISCONNECT"] = "disconnect";
-    WebRtcFsmEvent["ERROR"] = "error";
-    WebRtcFsmEvent["RESET"] = "reset";
-})(WebRtcFsmEvent || (WebRtcFsmEvent = {}));
-export { WebRtcState as WebRtcState };
-export { WebRtcFsmEvent as WebRtcFsmEvent };
+var WebRTCState;
+(function(WebRTCState) {
+    WebRTCState["IDLE"] = "IDLE";
+    WebRTCState["INITIALIZING"] = "INITIALIZING";
+    WebRTCState["CONNECTING"] = "CONNECTING";
+    WebRTCState["CONNECTED"] = "CONNECTED";
+    WebRTCState["RECONNECTING"] = "RECONNECTING";
+    WebRTCState["DISCONNECTED"] = "DISCONNECTED";
+    WebRTCState["ERROR"] = "ERROR";
+})(WebRTCState || (WebRTCState = {}));
+var WebRTCFsmEvent;
+(function(WebRTCFsmEvent) {
+    WebRTCFsmEvent["INIT"] = "initialize";
+    WebRTCFsmEvent["CONNECT"] = "connect";
+    WebRTCFsmEvent["CONNECTED"] = "connected";
+    WebRTCFsmEvent["RECONNECTING"] = "reconnecting";
+    WebRTCFsmEvent["DISCONNECT"] = "disconnect";
+    WebRTCFsmEvent["ERROR"] = "error";
+    WebRTCFsmEvent["RESET"] = "reset";
+})(WebRTCFsmEvent || (WebRTCFsmEvent = {}));
+export { WebRTCState as WebRTCState };
+export { WebRTCFsmEvent as WebRTCFsmEvent };
 class PubSub {
     #subs = new Map();
     #onError;
@@ -269,12 +269,18 @@ class FSM {
         this.#logger = config.logger ?? defaultLogger;
         this.#state = this.config.initial;
         this.context = this.#initContext();
-        this.#log(`FSM created with initial state "${this.#state}"`);
+        this.#debugLog(`FSM created with initial state "${this.#state}"`);
     }
-    #log(...args) {
+    #debugLog(...args) {
         if (this.#debug) {
             this.#logger.debug("[FSM]", ...args);
         }
+    }
+    get debug() {
+        return this.#debug;
+    }
+    get logger() {
+        return this.#logger;
     }
     get state() {
         return this.#state;
@@ -298,13 +304,13 @@ class FSM {
         this.#pubsub.publish("change", this.#getNotifyData());
     }
     subscribe(cb) {
-        this.#log("subscribe() called");
+        this.#debugLog("subscribe() called");
         const unsub = this.#pubsub.subscribe("change", cb);
         cb(this.#getNotifyData());
         return unsub;
     }
     transition(event, payload, assert = true) {
-        this.#log(`transition("${event}") called from state "${this.#state}"`);
+        this.#debugLog(`transition("${event}") called from state "${this.#state}"`);
         const currentStateConfig = this.config.states[this.#state];
         if (!currentStateConfig || !currentStateConfig.on) {
             throw new Error(`No transitions defined for state "${this.#state}"`);
@@ -315,7 +321,7 @@ class FSM {
             transitionDef = currentStateConfig.on["*"];
             usedWildcard = !!transitionDef;
             if (!transitionDef) {
-                this.#log(`transition("${event}") failed: no matching transition`);
+                this.#debugLog(`transition("${event}") failed: no matching transition`);
                 if (assert) {
                     throw new Error(`Invalid transition "${event}" from state "${this.#state}"`);
                 } else {
@@ -324,11 +330,11 @@ class FSM {
             }
         }
         if (usedWildcard) {
-            this.#log(`transition("${event}") using wildcard "*"`);
+            this.#debugLog(`transition("${event}") using wildcard "*"`);
         }
         const activeTransition = this.#resolveTransition(transitionDef, payload);
         if (!activeTransition) {
-            this.#log(`transition("${event}") failed: guard rejected`);
+            this.#debugLog(`transition("${event}") failed: guard rejected`);
             if (assert) {
                 throw new Error(`No valid transition found for event "${event}" in state "${this.#state}"`);
             } else {
@@ -336,29 +342,29 @@ class FSM {
             }
         }
         if (!activeTransition.target) {
-            this.#log(`transition("${event}") internal (no state change)`);
+            this.#debugLog(`transition("${event}") internal (no state change)`);
             if (typeof activeTransition.action === "function") {
-                this.#log(`transition("${event}") executing action`);
+                this.#debugLog(`transition("${event}") executing action`);
                 activeTransition.action(this.context, payload);
             }
             this.#notify();
             return this.#state;
         }
         const nextState = activeTransition.target;
-        this.#log(`transition("${event}"): "${this.#state}" -> "${nextState}"`);
+        this.#debugLog(`transition("${event}"): "${this.#state}" -> "${nextState}"`);
         if (typeof currentStateConfig.onExit === "function") {
-            this.#log(`transition("${event}") executing onExit for "${this.#state}"`);
+            this.#debugLog(`transition("${event}") executing onExit for "${this.#state}"`);
             currentStateConfig.onExit(this.context, payload);
         }
         if (typeof activeTransition.action === "function") {
-            this.#log(`transition("${event}") executing action`);
+            this.#debugLog(`transition("${event}") executing action`);
             activeTransition.action(this.context, payload);
         }
         this.#previous = this.#state;
         this.#state = nextState;
         const nextStateConfig = this.config.states[nextState];
         if (typeof nextStateConfig.onEnter === "function") {
-            this.#log(`transition("${event}") executing onEnter for "${nextState}"`);
+            this.#debugLog(`transition("${event}") executing onEnter for "${nextState}"`);
             nextStateConfig.onEnter(this.context, payload);
         }
         this.#notify();
@@ -387,7 +393,7 @@ class FSM {
         return transition;
     }
     reset() {
-        this.#log(`reset() called, returning to "${this.config.initial}"`);
+        this.#debugLog(`reset() called, returning to "${this.config.initial}"`);
         this.#state = this.config.initial;
         this.#previous = null;
         this.context = this.#initContext();
@@ -398,23 +404,23 @@ class FSM {
         return this.#state === state;
     }
     canTransition(event, payload) {
-        this.#log(`canTransition("${event}") called from state "${this.#state}"`);
+        this.#debugLog(`canTransition("${event}") called from state "${this.#state}"`);
         const currentStateConfig = this.config.states[this.#state];
         if (!currentStateConfig || !currentStateConfig.on) {
-            this.#log(`canTransition("${event}") -> false (no transitions defined)`);
+            this.#debugLog(`canTransition("${event}") -> false (no transitions defined)`);
             return false;
         }
         let transitionDef = currentStateConfig.on[event];
         if (!transitionDef) {
             transitionDef = currentStateConfig.on["*"];
             if (!transitionDef) {
-                this.#log(`canTransition("${event}") -> false (no matching transition)`);
+                this.#debugLog(`canTransition("${event}") -> false (no matching transition)`);
                 return false;
             }
         }
         const activeTransition = this.#resolveTransition(transitionDef, payload);
         const result = activeTransition !== null;
-        this.#log(`canTransition("${event}") -> ${result}`);
+        this.#debugLog(`canTransition("${event}") -> ${result}`);
         return result;
     }
     static fromMermaid(mermaidDiagram) {
@@ -459,25 +465,213 @@ class FSM {
         return mermaid;
     }
 }
-const createDefaultLogger = ()=>({
-        debug: (...args)=>{
-            console.debug(...args);
-            return String(args[0] ?? "");
-        },
-        log: (...args)=>{
-            console.log(...args);
-            return String(args[0] ?? "");
-        },
-        warn: (...args)=>{
-            console.warn(...args);
-            return String(args[0] ?? "");
-        },
-        error: (...args)=>{
-            console.error(...args);
-            return String(args[0] ?? "");
+const CLOG_STYLED = Symbol.for("@marianmeres/clog-styled");
+const COLORS = [
+    "#969696",
+    "#d26565",
+    "#cba14d",
+    "#8eba36",
+    "#3dc73d",
+    "#4dcba1",
+    "#67afd3",
+    "#8e8ed4",
+    "#b080c8",
+    "#be5b9d"
+];
+function autoColor(str) {
+    return COLORS[strHash(str) % COLORS.length];
+}
+function strHash(str) {
+    let hash = 0;
+    for(let i = 0; i < str.length; i++){
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return hash >>> 0;
+}
+const LEVEL_MAP = {
+    debug: "DEBUG",
+    log: "INFO",
+    warn: "WARNING",
+    error: "ERROR"
+};
+function _detectRuntime() {
+    if (typeof window !== "undefined" && window?.document) {
+        return "browser";
+    }
+    if (globalThis.Deno?.version?.deno) return "deno";
+    if (globalThis.process?.versions?.node) return "node";
+    return "unknown";
+}
+const GLOBAL_KEY = Symbol.for("@marianmeres/clog");
+const GLOBAL = globalThis[GLOBAL_KEY] ??= {
+    hook: undefined,
+    writer: undefined,
+    jsonOutput: false,
+    debug: undefined
+};
+function _processStyledArgs(args) {
+    let format = "";
+    const values = [];
+    for (const arg of args){
+        if (arg?.[CLOG_STYLED]) {
+            format += `%c${arg.text}%c `;
+            values.push(arg.style, "");
+        } else if (typeof arg === "string") {
+            format += `${arg} `;
+        } else {
+            format += "%o ";
+            values.push(arg);
         }
+    }
+    return [
+        format.trim(),
+        values
+    ];
+}
+function _hasStyledArgs(args) {
+    return args.some((arg)=>arg?.[CLOG_STYLED]);
+}
+function _cleanStyledArgs(args) {
+    return args.map((arg)=>arg?.[CLOG_STYLED] ? arg.text : arg);
+}
+const defaultWriter = (data)=>{
+    const { level, namespace, args, timestamp } = data;
+    const runtime = _detectRuntime();
+    const consoleMethod = {
+        DEBUG: "debug",
+        INFO: "log",
+        WARNING: "warn",
+        ERROR: "error"
+    }[level];
+    const ns = namespace ? `[${namespace}]` : "";
+    const hasStyled = _hasStyledArgs(args);
+    if ((runtime === "browser" || runtime === "deno") && hasStyled) {
+        const [content, contentValues] = _processStyledArgs(args);
+        if (runtime === "browser") {
+            console[consoleMethod](ns ? `${ns} ${content}` : content, ...contentValues);
+        } else {
+            const prefix = `[${timestamp}] [${level}]${ns ? ` ${ns}` : ""}`;
+            console[consoleMethod](`${prefix} ${content}`, ...contentValues);
+        }
+        return;
+    }
+    const cleanedArgs = _cleanStyledArgs(args);
+    if (runtime === "browser") {
+        console[consoleMethod](ns, ...cleanedArgs);
+    } else {
+        if (GLOBAL.jsonOutput) {
+            const output = {
+                timestamp,
+                level,
+                namespace,
+                message: cleanedArgs[0]
+            };
+            cleanedArgs.slice(1).forEach((arg, i)=>{
+                output[`arg_${i}`] = arg?.stack ?? arg;
+            });
+            console[consoleMethod](JSON.stringify(output));
+        } else {
+            const prefix = `[${timestamp}] [${level}]${ns ? ` ${ns}` : ""}`.trim();
+            console[consoleMethod](prefix, ...cleanedArgs);
+        }
+    }
+};
+const colorWriter = (color)=>(data)=>{
+        const { level, namespace, args, timestamp } = data;
+        const runtime = _detectRuntime();
+        if (runtime !== "browser" && runtime !== "deno" || !namespace) {
+            return defaultWriter(data);
+        }
+        const consoleMethod = {
+            DEBUG: "debug",
+            INFO: "log",
+            WARNING: "warn",
+            ERROR: "error"
+        }[level];
+        const ns = `[${namespace}]`;
+        if (color === "auto") {
+            color = autoColor(namespace);
+        }
+        if (_hasStyledArgs(args)) {
+            const [content, contentValues] = _processStyledArgs(args);
+            if (runtime === "browser") {
+                console[consoleMethod](`%c${ns}%c ${content}`, `color:${color}`, "", ...contentValues);
+            } else {
+                const prefix = `[${timestamp}] [${level}] %c${ns}%c`;
+                console[consoleMethod](`${prefix} ${content}`, `color:${color}`, "", ...contentValues);
+            }
+        } else {
+            if (runtime === "browser") {
+                console[consoleMethod](`%c${ns}`, `color:${color}`, ...args);
+            } else {
+                const prefix = `[${timestamp}] [${level}] %c${ns}`;
+                console[consoleMethod](prefix, `color:${color}`, ...args);
+            }
+        }
+    };
+function createClog(namespace, config) {
+    const ns = namespace ?? false;
+    const _apply = (level, args)=>{
+        const message = String(args[0] ?? "");
+        const data = {
+            level: LEVEL_MAP[level],
+            namespace: ns,
+            args,
+            timestamp: new Date().toISOString()
+        };
+        GLOBAL.hook?.(data);
+        let writer = GLOBAL.writer ?? config?.writer;
+        if (!writer && config?.color) {
+            writer = colorWriter(config.color);
+        }
+        writer = writer ?? defaultWriter;
+        writer(data);
+        return message;
+    };
+    const logger = (...args)=>_apply("log", args);
+    logger.debug = (config?.debug ?? GLOBAL.debug) === false ? (...args)=>String(args[0] ?? "") : (...args)=>_apply("debug", args);
+    logger.log = (...args)=>_apply("log", args);
+    logger.warn = (...args)=>_apply("warn", args);
+    logger.error = (...args)=>_apply("error", args);
+    Object.defineProperty(logger, "ns", {
+        value: ns,
+        writable: false
     });
-class WebRtcManager {
+    return logger;
+}
+createClog.global = GLOBAL;
+createClog.reset = ()=>{
+    createClog.global.hook = undefined;
+    createClog.global.writer = undefined;
+    createClog.global.jsonOutput = false;
+    createClog.global.debug = undefined;
+};
+function withNamespace(logger, namespace) {
+    const prefix = `[${namespace}]`;
+    const wrapped = (...args)=>{
+        logger.log(prefix, ...args);
+        return String(args[0] ?? "");
+    };
+    wrapped.debug = (...args)=>{
+        logger.debug(prefix, ...args);
+        return String(args[0] ?? "");
+    };
+    wrapped.log = (...args)=>{
+        logger.log(prefix, ...args);
+        return String(args[0] ?? "");
+    };
+    wrapped.warn = (...args)=>{
+        logger.warn(prefix, ...args);
+        return String(args[0] ?? "");
+    };
+    wrapped.error = (...args)=>{
+        logger.error(prefix, ...args);
+        return String(args[0] ?? "");
+    };
+    return wrapped;
+}
+class WebRTCManager {
     static EVENT_STATE_CHANGE = "state_change";
     static EVENT_LOCAL_STREAM = "local_stream";
     static EVENT_REMOTE_STREAM = "remote_stream";
@@ -507,52 +701,52 @@ class WebRtcManager {
     constructor(factory, config = {}){
         this.#factory = factory;
         this.#config = config;
-        this.#logger = config.logger ?? createDefaultLogger();
+        this.#logger = withNamespace(config.logger ?? createClog(), "WebRTCManager");
         this.#pubsub = new PubSub();
         this.#fsm = new FSM({
-            initial: WebRtcState.IDLE,
+            initial: WebRTCState.IDLE,
             states: {
-                [WebRtcState.IDLE]: {
+                [WebRTCState.IDLE]: {
                     on: {
-                        [WebRtcFsmEvent.INIT]: WebRtcState.INITIALIZING
+                        [WebRTCFsmEvent.INIT]: WebRTCState.INITIALIZING
                     }
                 },
-                [WebRtcState.INITIALIZING]: {
+                [WebRTCState.INITIALIZING]: {
                     on: {
-                        [WebRtcFsmEvent.CONNECT]: WebRtcState.CONNECTING,
-                        [WebRtcFsmEvent.ERROR]: WebRtcState.ERROR
+                        [WebRTCFsmEvent.CONNECT]: WebRTCState.CONNECTING,
+                        [WebRTCFsmEvent.ERROR]: WebRTCState.ERROR
                     }
                 },
-                [WebRtcState.CONNECTING]: {
+                [WebRTCState.CONNECTING]: {
                     on: {
-                        [WebRtcFsmEvent.CONNECTED]: WebRtcState.CONNECTED,
-                        [WebRtcFsmEvent.DISCONNECT]: WebRtcState.DISCONNECTED,
-                        [WebRtcFsmEvent.ERROR]: WebRtcState.ERROR
+                        [WebRTCFsmEvent.CONNECTED]: WebRTCState.CONNECTED,
+                        [WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
+                        [WebRTCFsmEvent.ERROR]: WebRTCState.ERROR
                     }
                 },
-                [WebRtcState.CONNECTED]: {
+                [WebRTCState.CONNECTED]: {
                     on: {
-                        [WebRtcFsmEvent.DISCONNECT]: WebRtcState.DISCONNECTED,
-                        [WebRtcFsmEvent.ERROR]: WebRtcState.ERROR
+                        [WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
+                        [WebRTCFsmEvent.ERROR]: WebRTCState.ERROR
                     }
                 },
-                [WebRtcState.RECONNECTING]: {
+                [WebRTCState.RECONNECTING]: {
                     on: {
-                        [WebRtcFsmEvent.CONNECT]: WebRtcState.CONNECTING,
-                        [WebRtcFsmEvent.DISCONNECT]: WebRtcState.DISCONNECTED,
-                        [WebRtcFsmEvent.RESET]: WebRtcState.IDLE
+                        [WebRTCFsmEvent.CONNECT]: WebRTCState.CONNECTING,
+                        [WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
+                        [WebRTCFsmEvent.RESET]: WebRTCState.IDLE
                     }
                 },
-                [WebRtcState.DISCONNECTED]: {
+                [WebRTCState.DISCONNECTED]: {
                     on: {
-                        [WebRtcFsmEvent.CONNECT]: WebRtcState.CONNECTING,
-                        [WebRtcFsmEvent.RECONNECTING]: WebRtcState.RECONNECTING,
-                        [WebRtcFsmEvent.RESET]: WebRtcState.IDLE
+                        [WebRTCFsmEvent.CONNECT]: WebRTCState.CONNECTING,
+                        [WebRTCFsmEvent.RECONNECTING]: WebRTCState.RECONNECTING,
+                        [WebRTCFsmEvent.RESET]: WebRTCState.IDLE
                     }
                 },
-                [WebRtcState.ERROR]: {
+                [WebRTCState.ERROR]: {
                     on: {
-                        [WebRtcFsmEvent.RESET]: WebRtcState.IDLE
+                        [WebRTCFsmEvent.RESET]: WebRTCState.IDLE
                     }
                 }
             }
@@ -589,11 +783,11 @@ class WebRtcManager {
             });
         handler(getCurrentState());
         const unsubscribers = [
-            this.#pubsub.subscribe(WebRtcManager.EVENT_STATE_CHANGE, ()=>handler(getCurrentState())),
-            this.#pubsub.subscribe(WebRtcManager.EVENT_LOCAL_STREAM, ()=>handler(getCurrentState())),
-            this.#pubsub.subscribe(WebRtcManager.EVENT_REMOTE_STREAM, ()=>handler(getCurrentState())),
-            this.#pubsub.subscribe(WebRtcManager.EVENT_DATA_CHANNEL_OPEN, ()=>handler(getCurrentState())),
-            this.#pubsub.subscribe(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, ()=>handler(getCurrentState()))
+            this.#pubsub.subscribe(WebRTCManager.EVENT_STATE_CHANGE, ()=>handler(getCurrentState())),
+            this.#pubsub.subscribe(WebRTCManager.EVENT_LOCAL_STREAM, ()=>handler(getCurrentState())),
+            this.#pubsub.subscribe(WebRTCManager.EVENT_REMOTE_STREAM, ()=>handler(getCurrentState())),
+            this.#pubsub.subscribe(WebRTCManager.EVENT_DATA_CHANNEL_OPEN, ()=>handler(getCurrentState())),
+            this.#pubsub.subscribe(WebRTCManager.EVENT_DATA_CHANNEL_CLOSE, ()=>handler(getCurrentState()))
         ];
         return ()=>{
             unsubscribers.forEach((unsub)=>unsub());
@@ -604,13 +798,13 @@ class WebRtcManager {
             const devices = await this.#factory.enumerateDevices();
             return devices.filter((d)=>d.kind === "audioinput");
         } catch (e) {
-            this.#logger.error("[WebRtcManager] Failed to enumerate devices:", e);
+            this.#logError("Failed to enumerate devices:", e);
             return [];
         }
     }
     async switchMicrophone(deviceId) {
         if (!this.#pc || !this.#localStream) {
-            this.#logger.error("[WebRtcManager] Cannot switch microphone: not initialized or no active stream");
+            this.#logError("Cannot switch microphone: not initialized or no active stream");
             return false;
         }
         try {
@@ -640,31 +834,31 @@ class WebRtcManager {
             await sender.replaceTrack(newTrack);
             this.#localStream.getAudioTracks().forEach((track)=>track.stop());
             this.#localStream = newStream;
-            this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, newStream);
+            this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, newStream);
             return true;
         } catch (e) {
-            this.#logger.error("[WebRtcManager] Failed to switch microphone:", e);
-            this.#error(e);
+            this.#logError("Failed to switch microphone:", e);
+            this.#handleError(e);
             return false;
         }
     }
     async initialize() {
-        if (this.state !== WebRtcState.IDLE) {
-            this.#debug("initialize() called but state is not IDLE:", this.state);
+        if (this.state !== WebRTCState.IDLE) {
+            this.#logger.debug("initialize() called but state is not IDLE:", this.state);
             return;
         }
-        this.#debug("Initializing...");
-        this.#dispatch(WebRtcFsmEvent.INIT);
+        this.#logger.debug("Initializing...");
+        this.#dispatch(WebRTCFsmEvent.INIT);
         try {
             this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
-            this.#debug("Peer connection created");
+            this.#logger.debug("Peer connection created");
             this.#setupPcListeners();
             this.#setupDeviceChangeListener();
             if (this.#config.enableMicrophone) {
-                this.#debug("Enabling microphone (config enabled)");
+                this.#logger.debug("Enabling microphone (config enabled)");
                 const success = await this.enableMicrophone(true);
                 if (!success) {
-                    this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, {
+                    this.#pubsub.publish(WebRTCManager.EVENT_MICROPHONE_FAILED, {
                         reason: "Failed to enable microphone during initialization"
                     });
                 }
@@ -672,53 +866,54 @@ class WebRtcManager {
                 this.#pc.addTransceiver("audio", {
                     direction: "recvonly"
                 });
-                this.#debug("Added recvonly audio transceiver");
+                this.#logger.debug("Added recvonly audio transceiver");
             }
             if (this.#config.dataChannelLabel) {
-                this.#debug("Creating default data channel:", this.#config.dataChannelLabel);
+                this.#logger.debug("Creating default data channel:", this.#config.dataChannelLabel);
                 this.createDataChannel(this.#config.dataChannelLabel);
             }
-            this.#debug("Initialization complete");
+            this.#logger.debug("Initialization complete");
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
         }
     }
     async connect() {
-        this.#debug("connect() called, current state:", this.state);
-        if (this.state === WebRtcState.IDLE) {
-            this.#debug("State is IDLE, initializing first");
+        this.#logger.debug("connect() called, current state:", this.state);
+        if (this.state === WebRTCState.IDLE) {
+            this.#logger.debug("State is IDLE, initializing first");
             await this.initialize();
         }
-        if (this.state === WebRtcState.DISCONNECTED) {
-            this.#debug("State is DISCONNECTED, reinitializing");
+        if (this.state === WebRTCState.DISCONNECTED) {
+            this.#logger.debug("State is DISCONNECTED, reinitializing");
             this.#cleanup();
-            this.#fsm.transition(WebRtcFsmEvent.RESET);
+            this.#fsm.transition(WebRTCFsmEvent.RESET);
             await this.initialize();
             return;
         }
-        if (this.state === WebRtcState.CONNECTED || this.state === WebRtcState.CONNECTING) {
-            this.#debug("Already connected or connecting, skipping");
+        if (this.state === WebRTCState.CONNECTED || this.state === WebRTCState.CONNECTING) {
+            this.#logger.debug("Already connected or connecting, skipping");
             return;
         }
-        this.#debug("Transitioning to CONNECTING");
-        this.#dispatch(WebRtcFsmEvent.CONNECT);
+        this.#logger.debug("Transitioning to CONNECTING");
+        this.#dispatch(WebRTCFsmEvent.CONNECT);
     }
     async enableMicrophone(enable) {
-        this.#debug("enableMicrophone() called:", enable);
+        this.#logger.debug("enableMicrophone() called:", enable);
         if (enable) {
             if (this.#localStream) {
-                this.#debug("Microphone already enabled");
+                this.#logger.debug("Microphone already enabled");
                 return true;
             }
             try {
-                this.#debug("Requesting user media...");
+                this.#logger.debug("Requesting user media...");
                 const stream = await this.#factory.getUserMedia({
                     audio: true,
                     video: false
                 });
-                this.#debug("User media obtained, tracks:", stream.getAudioTracks().length);
+                this.#logger.debug("User media obtained, tracks:", stream.getAudioTracks().length);
                 this.#localStream = stream;
-                this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, stream);
+                this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, stream);
                 if (this.#pc) {
                     const transceivers = this.#pc.getTransceivers();
                     const audioTransceiver = transceivers.find((t)=>t.receiver.track.kind === "audio");
@@ -726,29 +921,29 @@ class WebRtcManager {
                         const track = stream.getAudioTracks()[0];
                         await audioTransceiver.sender.replaceTrack(track);
                         audioTransceiver.direction = "sendrecv";
-                        this.#debug("Replaced track in existing transceiver");
+                        this.#logger.debug("Replaced track in existing transceiver");
                     } else {
                         stream.getTracks().forEach((track)=>{
                             this.#pc.addTrack(track, stream);
                         });
-                        this.#debug("Added tracks to peer connection");
+                        this.#logger.debug("Added tracks to peer connection");
                     }
                 }
-                this.#debug("Microphone enabled successfully");
+                this.#logger.debug("Microphone enabled successfully");
                 return true;
             } catch (e) {
-                this.#logger.error("[WebRtcManager] Failed to get user media:", e);
-                this.#pubsub.publish(WebRtcManager.EVENT_MICROPHONE_FAILED, {
+                this.#logError("Failed to get user media:", e);
+                this.#pubsub.publish(WebRTCManager.EVENT_MICROPHONE_FAILED, {
                     error: e
                 });
                 return false;
             }
         } else {
             if (!this.#localStream) {
-                this.#debug("Microphone already disabled");
+                this.#logger.debug("Microphone already disabled");
                 return true;
             }
-            this.#debug("Disabling microphone...");
+            this.#logger.debug("Disabling microphone...");
             this.#localStream.getTracks().forEach((track)=>{
                 track.stop();
                 if (this.#pc) {
@@ -760,47 +955,48 @@ class WebRtcManager {
                 }
             });
             this.#localStream = null;
-            this.#pubsub.publish(WebRtcManager.EVENT_LOCAL_STREAM, null);
-            this.#debug("Microphone disabled");
+            this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, null);
+            this.#logger.debug("Microphone disabled");
             return true;
         }
     }
     disconnect() {
-        this.#debug("disconnect() called");
+        this.#logger.debug("disconnect() called");
         this.#cleanup();
-        this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+        this.#dispatch(WebRTCFsmEvent.DISCONNECT);
     }
     reset() {
-        this.#debug("reset() called, current state:", this.state);
+        this.#logger.debug("reset() called, current state:", this.state);
         this.#cleanup();
-        if (this.state !== WebRtcState.IDLE) {
-            if (this.state === WebRtcState.ERROR || this.state === WebRtcState.DISCONNECTED || this.state === WebRtcState.RECONNECTING) {
-                this.#dispatch(WebRtcFsmEvent.RESET);
+        if (this.state !== WebRTCState.IDLE) {
+            if (this.state === WebRTCState.ERROR || this.state === WebRTCState.DISCONNECTED || this.state === WebRTCState.RECONNECTING) {
+                this.#dispatch(WebRTCFsmEvent.RESET);
             } else {
-                this.#dispatch(WebRtcFsmEvent.DISCONNECT);
-                this.#dispatch(WebRtcFsmEvent.RESET);
+                this.#dispatch(WebRTCFsmEvent.DISCONNECT);
+                this.#dispatch(WebRTCFsmEvent.RESET);
             }
         }
-        this.#debug("Reset complete, state:", this.state);
+        this.#logger.debug("Reset complete, state:", this.state);
     }
     createDataChannel(label, options) {
-        this.#debug("createDataChannel() called:", label);
+        this.#logger.debug("createDataChannel() called:", label);
         if (!this.#pc) {
-            this.#debug("Cannot create data channel: peer connection not initialized");
+            this.#logger.debug("Cannot create data channel: peer connection not initialized");
             return null;
         }
         if (this.#dataChannels.has(label)) {
-            this.#debug("Returning existing data channel:", label);
+            this.#logger.debug("Returning existing data channel:", label);
             return this.#dataChannels.get(label);
         }
         try {
             const dc = this.#pc.createDataChannel(label, options);
             this.#setupDataChannelListeners(dc);
             this.#dataChannels.set(label, dc);
-            this.#debug("Data channel created:", label);
+            this.#logger.debug("Data channel created:", label);
             return dc;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return null;
         }
     }
@@ -810,102 +1006,108 @@ class WebRtcManager {
     sendData(label, data) {
         const channel = this.#dataChannels.get(label);
         if (!channel) {
-            this.#debug(`Data channel '${label}' not found`);
+            this.#logger.debug(`Data channel '${label}' not found`);
             return false;
         }
         if (channel.readyState !== "open") {
-            this.#debug(`Data channel '${label}' is not open (state: ${channel.readyState})`);
+            this.#logger.debug(`Data channel '${label}' is not open (state: ${channel.readyState})`);
             return false;
         }
         try {
             channel.send(data);
             return true;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return false;
         }
     }
     async createOffer(options) {
-        this.#debug("createOffer() called");
+        this.#logger.debug("createOffer() called");
         if (!this.#pc) {
-            this.#debug("Cannot create offer: peer connection not initialized");
+            this.#logger.debug("Cannot create offer: peer connection not initialized");
             return null;
         }
         try {
             const offer = await this.#pc.createOffer(options);
-            this.#debug("Offer created:", offer.type);
+            this.#logger.debug("Offer created:", offer.type);
             return offer;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return null;
         }
     }
     async createAnswer(options) {
-        this.#debug("createAnswer() called");
+        this.#logger.debug("createAnswer() called");
         if (!this.#pc) {
-            this.#debug("Cannot create answer: peer connection not initialized");
+            this.#logger.debug("Cannot create answer: peer connection not initialized");
             return null;
         }
         try {
             const answer = await this.#pc.createAnswer(options);
-            this.#debug("Answer created:", answer.type);
+            this.#logger.debug("Answer created:", answer.type);
             return answer;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return null;
         }
     }
     async setLocalDescription(description) {
-        this.#debug("setLocalDescription() called:", description.type);
+        this.#logger.debug("setLocalDescription() called:", description.type);
         if (!this.#pc) {
-            this.#debug("Cannot set local description: peer connection not initialized");
+            this.#logger.debug("Cannot set local description: peer connection not initialized");
             return false;
         }
         try {
             await this.#pc.setLocalDescription(description);
-            this.#debug("Local description set successfully");
+            this.#logger.debug("Local description set successfully");
             return true;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return false;
         }
     }
     async setRemoteDescription(description) {
-        this.#debug("setRemoteDescription() called:", description.type);
+        this.#logger.debug("setRemoteDescription() called:", description.type);
         if (!this.#pc) {
-            this.#debug("Cannot set remote description: peer connection not initialized");
+            this.#logger.debug("Cannot set remote description: peer connection not initialized");
             return false;
         }
         try {
             await this.#pc.setRemoteDescription(description);
-            this.#debug("Remote description set successfully");
+            this.#logger.debug("Remote description set successfully");
             return true;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return false;
         }
     }
     async addIceCandidate(candidate) {
-        this.#debug("addIceCandidate() called:", candidate ? "candidate" : "null (end-of-candidates)");
+        this.#logger.debug("addIceCandidate() called:", candidate ? "candidate" : "null (end-of-candidates)");
         if (!this.#pc) {
-            this.#debug("Cannot add ICE candidate: peer connection not initialized");
+            this.#logger.debug("Cannot add ICE candidate: peer connection not initialized");
             return false;
         }
         try {
             if (candidate) {
                 await this.#pc.addIceCandidate(candidate);
-                this.#debug("ICE candidate added");
+                this.#logger.debug("ICE candidate added");
             }
             return true;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return false;
         }
     }
     async iceRestart() {
-        this.#debug("iceRestart() called");
+        this.#logger.debug("iceRestart() called");
         if (!this.#pc) {
-            this.#debug("Cannot perform ICE restart: peer connection not initialized");
+            this.#logger.debug("Cannot perform ICE restart: peer connection not initialized");
             return false;
         }
         try {
@@ -913,12 +1115,53 @@ class WebRtcManager {
                 iceRestart: true
             });
             await this.#pc.setLocalDescription(offer);
-            this.#debug("ICE restart initiated");
+            this.#logger.debug("ICE restart initiated");
             return true;
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return false;
         }
+    }
+    gatherIceCandidates(options = {}) {
+        const { timeout = 10000, onCandidate } = options;
+        if (!this.#pc) {
+            return Promise.reject(new Error("Peer connection not initialized"));
+        }
+        const pc = this.#pc;
+        if (pc.iceGatheringState === "complete") {
+            this.#logger.debug("ICE gathering already complete");
+            return Promise.resolve();
+        }
+        this.#logger.debug("Waiting for ICE gathering to complete...");
+        return new Promise((resolve, reject)=>{
+            const timer = setTimeout(()=>{
+                cleanup();
+                reject(new Error("ICE gathering timeout"));
+            }, timeout);
+            const cleanup = ()=>{
+                clearTimeout(timer);
+                pc.removeEventListener("icegatheringstatechange", checkState);
+                pc.removeEventListener("icecandidate", handleCandidate);
+            };
+            const checkState = ()=>{
+                if (pc.iceGatheringState === "complete") {
+                    this.#logger.debug("ICE gathering complete (via state change)");
+                    cleanup();
+                    resolve();
+                }
+            };
+            const handleCandidate = (event)=>{
+                onCandidate?.(event.candidate);
+                if (event.candidate === null) {
+                    this.#logger.debug("ICE gathering complete (null candidate)");
+                    cleanup();
+                    resolve();
+                }
+            };
+            pc.addEventListener("icegatheringstatechange", checkState);
+            pc.addEventListener("icecandidate", handleCandidate);
+        });
     }
     getLocalDescription() {
         return this.#pc?.localDescription ?? null;
@@ -931,7 +1174,8 @@ class WebRtcManager {
         try {
             return await this.#pc.getStats();
         } catch (e) {
-            this.#error(e);
+            this.#logError(e);
+            this.#handleError(e);
             return null;
         }
     }
@@ -940,61 +1184,68 @@ class WebRtcManager {
         this.#fsm.transition(event);
         const newState = this.#fsm.state;
         if (oldState !== newState) {
-            this.#debug("State transition:", oldState, "->", newState, "(event:", event + ")");
-            this.#pubsub.publish(WebRtcManager.EVENT_STATE_CHANGE, newState);
+            this.#logger.debug("State transition:", oldState, "->", newState, "(event:", event + ")");
+            this.#pubsub.publish(WebRTCManager.EVENT_STATE_CHANGE, newState);
         }
     }
-    #debug(...args) {
-        if (this.#config.debug) {
-            this.#logger.debug("[WebRtcManager]", ...args);
-        }
+    #log(...args) {
+        this.#logger.log(...args);
     }
-    #error(error) {
-        this.#logger.error("[WebRtcManager]", error);
-        this.#dispatch(WebRtcFsmEvent.ERROR);
-        this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
+    #logWarn(...args) {
+        this.#logger.warn(...args);
+    }
+    #logError(...args) {
+        this.#logger.error(...args);
+    }
+    #handleError(error) {
+        this.#dispatch(WebRTCFsmEvent.ERROR);
+        this.#pubsub.publish(WebRTCManager.EVENT_ERROR, error);
     }
     #setupPcListeners() {
         if (!this.#pc) return;
-        this.#debug("Setting up peer connection listeners");
+        this.#logger.debug("Setting up peer connection listeners");
         this.#pc.onconnectionstatechange = ()=>{
             const state = this.#pc.connectionState;
-            this.#debug("Connection state changed:", state);
+            this.#logger.debug("Connection state changed:", state);
             if (state === "connected") {
-                this.#reconnectAttempts = 0;
-                if (this.#fullReconnectTimeoutTimer !== null) {
-                    clearTimeout(this.#fullReconnectTimeoutTimer);
-                    this.#fullReconnectTimeoutTimer = null;
+                if (this.state === WebRTCState.CONNECTING) {
+                    this.#reconnectAttempts = 0;
+                    if (this.#fullReconnectTimeoutTimer !== null) {
+                        clearTimeout(this.#fullReconnectTimeoutTimer);
+                        this.#fullReconnectTimeoutTimer = null;
+                    }
+                    this.#dispatch(WebRTCFsmEvent.CONNECTED);
+                } else {
+                    this.#logger.debug(`Ignoring late connection success (current state: ${this.state})`);
                 }
-                this.#dispatch(WebRtcFsmEvent.CONNECTED);
             } else if (state === "failed") {
                 this.#handleConnectionFailure();
             } else if (state === "disconnected" || state === "closed") {
-                if (this.state !== WebRtcState.DISCONNECTED && this.state !== WebRtcState.ERROR && this.state !== WebRtcState.IDLE) {
-                    this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+                if (this.state !== WebRTCState.DISCONNECTED && this.state !== WebRTCState.ERROR && this.state !== WebRTCState.IDLE) {
+                    this.#dispatch(WebRTCFsmEvent.DISCONNECT);
                 }
             }
         };
         this.#pc.ontrack = (event)=>{
-            this.#debug("Remote track received:", event.track.kind);
+            this.#logger.debug("Remote track received:", event.track.kind);
             if (event.streams && event.streams[0]) {
                 this.#remoteStream = event.streams[0];
-                this.#pubsub.publish(WebRtcManager.EVENT_REMOTE_STREAM, this.#remoteStream);
+                this.#pubsub.publish(WebRTCManager.EVENT_REMOTE_STREAM, this.#remoteStream);
             }
         };
         this.#pc.ondatachannel = (event)=>{
             const dc = event.channel;
-            this.#debug("Remote data channel received:", dc.label);
+            this.#logger.debug("Remote data channel received:", dc.label);
             this.#setupDataChannelListeners(dc);
             this.#dataChannels.set(dc.label, dc);
         };
         this.#pc.onicecandidate = (event)=>{
-            this.#debug("ICE candidate generated:", event.candidate ? "candidate" : "null (gathering complete)");
-            this.#pubsub.publish(WebRtcManager.EVENT_ICE_CANDIDATE, event.candidate);
+            this.#logger.debug("ICE candidate generated:", event.candidate ? "candidate" : "null (gathering complete)");
+            this.#pubsub.publish(WebRTCManager.EVENT_ICE_CANDIDATE, event.candidate);
         };
     }
     #cleanup() {
-        this.#debug("Cleanup started");
+        this.#logger.debug("Cleanup started");
         if (this.#reconnectTimer !== null) {
             clearTimeout(this.#reconnectTimer);
             this.#reconnectTimer = null;
@@ -1015,34 +1266,34 @@ class WebRtcManager {
         });
         this.#dataChannels.clear();
         if (dcCount > 0) {
-            this.#debug("Closed", dcCount, "data channel(s)");
+            this.#logger.debug("Closed", dcCount, "data channel(s)");
         }
         if (this.#localStream) {
             this.#localStream.getTracks().forEach((track)=>track.stop());
             this.#localStream = null;
-            this.#debug("Local stream stopped");
+            this.#logger.debug("Local stream stopped");
         }
         if (this.#pc) {
             this.#pc.close();
             this.#pc = null;
-            this.#debug("Peer connection closed");
+            this.#logger.debug("Peer connection closed");
         }
         this.#remoteStream = null;
-        this.#debug("Cleanup complete");
+        this.#logger.debug("Cleanup complete");
     }
     #handleConnectionFailure() {
-        this.#debug("Handling connection failure");
-        if (this.state !== WebRtcState.DISCONNECTED && this.state !== WebRtcState.ERROR && this.state !== WebRtcState.IDLE) {
-            this.#dispatch(WebRtcFsmEvent.DISCONNECT);
+        this.#logger.debug("Handling connection failure");
+        if (this.state !== WebRTCState.DISCONNECTED && this.state !== WebRTCState.ERROR && this.state !== WebRTCState.IDLE) {
+            this.#dispatch(WebRTCFsmEvent.DISCONNECT);
         }
         if (!this.#config.autoReconnect) {
-            this.#debug("Auto-reconnect disabled, not attempting reconnection");
+            this.#logger.debug("Auto-reconnect disabled, not attempting reconnection");
             return;
         }
         const maxAttempts = this.#config.maxReconnectAttempts ?? 5;
         if (this.#reconnectAttempts >= maxAttempts) {
-            this.#debug("Max reconnection attempts reached:", maxAttempts);
-            this.#pubsub.publish(WebRtcManager.EVENT_RECONNECT_FAILED, {
+            this.#logger.debug("Max reconnection attempts reached:", maxAttempts);
+            this.#pubsub.publish(WebRTCManager.EVENT_RECONNECT_FAILED, {
                 attempts: this.#reconnectAttempts
             });
             return;
@@ -1056,11 +1307,11 @@ class WebRtcManager {
                 strategy
             });
             if (!shouldProceed) {
-                this.#debug("Reconnection suppressed by shouldReconnect callback");
+                this.#logger.debug("Reconnection suppressed by shouldReconnect callback");
                 return;
             }
         }
-        this.#dispatch(WebRtcFsmEvent.RECONNECTING);
+        this.#dispatch(WebRTCFsmEvent.RECONNECTING);
         this.#attemptReconnect();
     }
     #attemptReconnect() {
@@ -1068,12 +1319,12 @@ class WebRtcManager {
         const baseDelay = this.#config.reconnectDelay ?? 1000;
         const delay = baseDelay * Math.pow(2, this.#reconnectAttempts - 1);
         const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
-        this.#debug("Attempting reconnection:", {
+        this.#logger.debug("Attempting reconnection:", {
             attempt: this.#reconnectAttempts,
             strategy,
             delay: delay + "ms"
         });
-        this.#pubsub.publish(WebRtcManager.EVENT_RECONNECTING, {
+        this.#pubsub.publish(WebRTCManager.EVENT_RECONNECTING, {
             attempt: this.#reconnectAttempts,
             strategy
         });
@@ -1087,18 +1338,18 @@ class WebRtcManager {
             } else {
                 try {
                     this.#cleanup();
-                    this.#dispatch(WebRtcFsmEvent.RESET);
+                    this.#dispatch(WebRTCFsmEvent.RESET);
                     await this.connect();
                     const timeout = this.#config.fullReconnectTimeout ?? 30000;
                     this.#fullReconnectTimeoutTimer = setTimeout(()=>{
                         this.#fullReconnectTimeoutTimer = null;
-                        if (this.state !== WebRtcState.CONNECTED) {
-                            this.#debug("Full reconnection timeout reached, connection not established");
+                        if (this.state !== WebRTCState.CONNECTED) {
+                            this.#logger.debug("Full reconnection timeout reached, connection not established");
                             this.#handleConnectionFailure();
                         }
                     }, timeout);
                 } catch (e) {
-                    this.#logger.error("[WebRtcManager] Reconnection failed:", e);
+                    this.#logError("Reconnection failed:", e);
                     this.#handleConnectionFailure();
                 }
             }
@@ -1114,34 +1365,34 @@ class WebRtcManager {
         this.#deviceChangeHandler = async ()=>{
             try {
                 const devices = await this.getAudioInputDevices();
-                this.#pubsub.publish(WebRtcManager.EVENT_DEVICE_CHANGED, devices);
+                this.#pubsub.publish(WebRTCManager.EVENT_DEVICE_CHANGED, devices);
             } catch (e) {
-                this.#logger.error("[WebRtcManager] Error handling device change:", e);
+                this.#logError("Error handling device change:", e);
             }
         };
         navigator.mediaDevices.addEventListener("devicechange", this.#deviceChangeHandler);
     }
     #setupDataChannelListeners(dc) {
         dc.onopen = ()=>{
-            this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_OPEN, dc);
+            this.#pubsub.publish(WebRTCManager.EVENT_DATA_CHANNEL_OPEN, dc);
         };
         dc.onmessage = (event)=>{
-            this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_MESSAGE, {
+            this.#pubsub.publish(WebRTCManager.EVENT_DATA_CHANNEL_MESSAGE, {
                 channel: dc,
                 data: event.data
             });
         };
         dc.onclose = ()=>{
-            this.#pubsub.publish(WebRtcManager.EVENT_DATA_CHANNEL_CLOSE, dc);
+            this.#pubsub.publish(WebRTCManager.EVENT_DATA_CHANNEL_CLOSE, dc);
             this.#dataChannels.delete(dc.label);
         };
         dc.onerror = (error)=>{
             const isUserAbort = error?.error?.message?.includes("User-Initiated Abort");
             if (!isUserAbort) {
-                this.#logger.error("[WebRtcManager] Data channel error:", error);
-                this.#pubsub.publish(WebRtcManager.EVENT_ERROR, error);
+                this.#logError("Data channel error:", error);
+                this.#pubsub.publish(WebRTCManager.EVENT_ERROR, error);
             }
         };
     }
 }
-export { WebRtcManager as WebRtcManager };
+export { WebRTCManager as WebRTCManager };

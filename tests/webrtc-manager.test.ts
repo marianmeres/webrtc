@@ -1,18 +1,22 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
-import { WebRtcManager } from "../src/webrtc-manager.ts";
-import { WebRtcState, type Logger } from "../src/types.ts";
-import { MockWebRtcFactory, MockRTCPeerConnection } from "./mocks.ts";
+import { WebRTCManager } from "../src/webrtc-manager.ts";
+import { WebRTCState, type Logger } from "../src/types.ts";
+import { MockWebRTCFactory, type MockRTCPeerConnection } from "./mocks.ts";
+import { createClog } from "@marianmeres/clog";
+
+// do not debug
+createClog.global.debug = false;
 
 Deno.test("Initial State", () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
-	assertEquals(manager.state, WebRtcState.IDLE);
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+	assertEquals(manager.state, WebRTCState.IDLE);
 	// console.log(manager.toMermaid());
 });
 
 Deno.test("Initialize and Connect", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
 
 	let stateChangeCount = 0;
 	manager.on("state_change", (state) => {
@@ -21,15 +25,15 @@ Deno.test("Initialize and Connect", async () => {
 	});
 
 	await manager.initialize();
-	assertEquals(manager.state, WebRtcState.INITIALIZING);
+	assertEquals(manager.state, WebRTCState.INITIALIZING);
 
 	await manager.connect();
-	assertEquals(manager.state, WebRtcState.CONNECTING);
+	assertEquals(manager.state, WebRTCState.CONNECTING);
 });
 
 Deno.test("Audio Handling", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
 
 	await manager.initialize();
 
@@ -50,8 +54,8 @@ Deno.test("Audio Handling", async () => {
 });
 
 Deno.test("PubSub Notifications", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
 
 	const events: string[] = [];
 	manager.on("state_change", (state) => events.push(`state:${state}`));
@@ -62,13 +66,13 @@ Deno.test("PubSub Notifications", async () => {
 	await manager.initialize();
 	await manager.enableMicrophone(true);
 
-	assertEquals(events.includes(`state:${WebRtcState.INITIALIZING}`), true);
+	assertEquals(events.includes(`state:${WebRTCState.INITIALIZING}`), true);
 	assertEquals(events.includes("stream:active"), true);
 });
 
 Deno.test("Data Channel", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory, {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory, {
 		dataChannelLabel: "chat",
 	});
 
@@ -108,7 +112,7 @@ Deno.test("Data Channel", async () => {
 	// Let's check our MockRTCDataChannel implementation.
 	// It has onopen/onmessage properties but doesn't automatically trigger them on dispatchEvent unless we wire it up.
 	// Actually, standard EventTarget doesn't call on<event> properties.
-	// But our WebRtcManager sets dc.onopen = ...
+	// But our WebRTCManager sets dc.onopen = ...
 	// So if we call dc.onopen(), it should work.
 
 	// deno-lint-ignore no-explicit-any
@@ -119,8 +123,8 @@ Deno.test("Data Channel", async () => {
 	assertEquals(lastMessage, "hello");
 });
 
-Deno.test("Custom Logger - debug logs when debug enabled", async () => {
-	const factory = new MockWebRtcFactory();
+Deno.test("Custom Logger - debug logs are sent to logger", async () => {
+	const factory = new MockWebRTCFactory();
 	// deno-lint-ignore no-explicit-any
 	const logs: { level: string; args: any[] }[] = [];
 
@@ -143,8 +147,7 @@ Deno.test("Custom Logger - debug logs when debug enabled", async () => {
 		},
 	};
 
-	const manager = new WebRtcManager(factory, {
-		debug: true,
+	const manager = new WebRTCManager(factory, {
 		logger: customLogger,
 	});
 
@@ -153,47 +156,11 @@ Deno.test("Custom Logger - debug logs when debug enabled", async () => {
 	// Should have debug logs from initialization
 	const debugLogs = logs.filter((l) => l.level === "debug");
 	assertEquals(debugLogs.length > 0, true);
-	assertEquals(debugLogs[0].args[0], "[WebRtcManager]");
-});
-
-Deno.test("Custom Logger - no debug logs when debug disabled", async () => {
-	const factory = new MockWebRtcFactory();
-	// deno-lint-ignore no-explicit-any
-	const logs: { level: string; args: any[] }[] = [];
-
-	const customLogger: Logger = {
-		debug: (...args) => {
-			logs.push({ level: "debug", args });
-			return String(args[0] ?? "");
-		},
-		log: (...args) => {
-			logs.push({ level: "log", args });
-			return String(args[0] ?? "");
-		},
-		warn: (...args) => {
-			logs.push({ level: "warn", args });
-			return String(args[0] ?? "");
-		},
-		error: (...args) => {
-			logs.push({ level: "error", args });
-			return String(args[0] ?? "");
-		},
-	};
-
-	const manager = new WebRtcManager(factory, {
-		debug: false, // Debug disabled
-		logger: customLogger,
-	});
-
-	await manager.initialize();
-
-	// Should NOT have debug logs when debug is disabled
-	const debugLogs = logs.filter((l) => l.level === "debug");
-	assertEquals(debugLogs.length, 0);
+	assertEquals(debugLogs[0].args[0], "[WebRTCManager]");
 });
 
 Deno.test("Custom Logger - errors are logged via logger", async () => {
-	const factory = new MockWebRtcFactory();
+	const factory = new MockWebRTCFactory();
 	// deno-lint-ignore no-explicit-any
 	const logs: { level: string; args: any[] }[] = [];
 
@@ -216,7 +183,7 @@ Deno.test("Custom Logger - errors are logged via logger", async () => {
 		},
 	};
 
-	const manager = new WebRtcManager(factory, {
+	const manager = new WebRTCManager(factory, {
 		logger: customLogger,
 	});
 
@@ -228,7 +195,7 @@ Deno.test("Custom Logger - errors are logged via logger", async () => {
 	assertEquals(errorLogs.length > 0, true);
 	// Error logs include the prefix in the message
 	assertEquals(
-		String(errorLogs[0].args[0]).startsWith("[WebRtcManager]"),
+		String(errorLogs[0].args[0]).startsWith("[WebRTCManager]"),
 		true
 	);
 });
@@ -236,70 +203,76 @@ Deno.test("Custom Logger - errors are logged via logger", async () => {
 Deno.test(
 	"Default Logger - falls back to console when no logger provided",
 	() => {
-		const factory = new MockWebRtcFactory();
+		const factory = new MockWebRTCFactory();
 
 		// Should not throw when no logger is provided
-		const manager = new WebRtcManager(factory, { debug: true });
+		const manager = new WebRTCManager(factory);
 
-		assertEquals(manager.state, WebRtcState.IDLE);
+		assertEquals(manager.state, WebRTCState.IDLE);
 	}
 );
 
 // --- gatherIceCandidates tests ---
 
-Deno.test("gatherIceCandidates - resolves when gathering complete", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+Deno.test(
+	"gatherIceCandidates - resolves when gathering complete",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
 
-	await manager.initialize();
+		await manager.initialize();
 
-	// Get the mock peer connection
-	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		// Get the mock peer connection
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
 
-	// Start gathering and simulate completion
-	const gatherPromise = manager.gatherIceCandidates();
+		// Start gathering and simulate completion
+		const gatherPromise = manager.gatherIceCandidates();
 
-	// Simulate ICE gathering completion
-	pc.simulateIceGathering();
+		// Simulate ICE gathering completion
+		pc.simulateIceGathering();
 
-	// Should resolve without error
-	await gatherPromise;
-});
+		// Should resolve without error
+		await gatherPromise;
+	}
+);
 
-Deno.test("gatherIceCandidates - calls onCandidate for each candidate", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+Deno.test(
+	"gatherIceCandidates - calls onCandidate for each candidate",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
 
-	await manager.initialize();
+		await manager.initialize();
 
-	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
 
-	// deno-lint-ignore no-explicit-any
-	const candidates: (RTCIceCandidate | null)[] = [];
-	const mockCandidate1 = { candidate: "candidate1" } as RTCIceCandidate;
-	const mockCandidate2 = { candidate: "candidate2" } as RTCIceCandidate;
+		// deno-lint-ignore no-explicit-any
+		const candidates: (RTCIceCandidate | null)[] = [];
+		const mockCandidate1 = { candidate: "candidate1" } as RTCIceCandidate;
+		const mockCandidate2 = { candidate: "candidate2" } as RTCIceCandidate;
 
-	const gatherPromise = manager.gatherIceCandidates({
-		onCandidate: (candidate) => {
-			candidates.push(candidate);
-		},
-	});
+		const gatherPromise = manager.gatherIceCandidates({
+			onCandidate: (candidate) => {
+				candidates.push(candidate);
+			},
+		});
 
-	// Simulate ICE gathering with candidates
-	pc.simulateIceGathering([mockCandidate1, mockCandidate2]);
+		// Simulate ICE gathering with candidates
+		pc.simulateIceGathering([mockCandidate1, mockCandidate2]);
 
-	await gatherPromise;
+		await gatherPromise;
 
-	// Should have received all candidates plus null
-	assertEquals(candidates.length, 3);
-	assertEquals(candidates[0], mockCandidate1);
-	assertEquals(candidates[1], mockCandidate2);
-	assertEquals(candidates[2], null);
-});
+		// Should have received all candidates plus null
+		assertEquals(candidates.length, 3);
+		assertEquals(candidates[0], mockCandidate1);
+		assertEquals(candidates[1], mockCandidate2);
+		assertEquals(candidates[2], null);
+	}
+);
 
 Deno.test("gatherIceCandidates - throws on timeout", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
 
 	await manager.initialize();
 
@@ -311,30 +284,36 @@ Deno.test("gatherIceCandidates - throws on timeout", async () => {
 	);
 });
 
-Deno.test("gatherIceCandidates - resolves immediately if already complete", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+Deno.test(
+	"gatherIceCandidates - resolves immediately if already complete",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
 
-	await manager.initialize();
+		await manager.initialize();
 
-	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
 
-	// Set state to complete before calling gatherIceCandidates
-	pc.iceGatheringState = "complete";
+		// Set state to complete before calling gatherIceCandidates
+		pc.iceGatheringState = "complete";
 
-	// Should resolve immediately
-	await manager.gatherIceCandidates();
-});
+		// Should resolve immediately
+		await manager.gatherIceCandidates();
+	}
+);
 
-Deno.test("gatherIceCandidates - throws if peer connection not initialized", async () => {
-	const factory = new MockWebRtcFactory();
-	const manager = new WebRtcManager(factory);
+Deno.test(
+	"gatherIceCandidates - throws if peer connection not initialized",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
 
-	// Don't initialize - peer connection is null
+		// Don't initialize - peer connection is null
 
-	await assertRejects(
-		() => manager.gatherIceCandidates(),
-		Error,
-		"Peer connection not initialized"
-	);
-});
+		await assertRejects(
+			() => manager.gatherIceCandidates(),
+			Error,
+			"Peer connection not initialized"
+		);
+	}
+);

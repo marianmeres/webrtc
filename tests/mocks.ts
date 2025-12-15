@@ -195,9 +195,8 @@ export class MockRTCPeerConnection extends EventTarget {
 				(l) => l !== listener
 			);
 		} else if (type === "icegatheringstatechange") {
-			this.#iceGatheringStateListeners = this.#iceGatheringStateListeners.filter(
-				(l) => l !== listener
-			);
+			this.#iceGatheringStateListeners =
+				this.#iceGatheringStateListeners.filter((l) => l !== listener);
 		}
 		// Call parent for other event types
 		super.removeEventListener(type, listener);
@@ -224,7 +223,7 @@ export class MockRTCPeerConnection extends EventTarget {
 	}
 }
 
-export class MockWebRtcFactory {
+export class MockWebRTCFactory {
 	createPeerConnection(config?: RTCConfiguration): RTCPeerConnection {
 		return new MockRTCPeerConnection(config) as unknown as RTCPeerConnection;
 	}

@@ -15,10 +15,10 @@ export interface Logger {
 }
 
 /**
- * Configuration options for WebRtcManager.
+ * Configuration options for WebRTCManager.
  * All options are optional with sensible defaults.
  */
-export interface WebRtcManagerConfig {
+export interface WebRTCManagerConfig {
 	/** Initial peer configuration (ICE servers, etc.) */
 	peerConfig?: RTCConfiguration;
 	/** Whether to enable microphone initially. Defaults to false. */
@@ -47,8 +47,6 @@ export interface WebRtcManagerConfig {
 		/** Strategy that will be used: "ice-restart" for first attempts, "full" for later */
 		strategy: "ice-restart" | "full";
 	}) => boolean;
-	/** Enable debug logging. Defaults to false. */
-	debug?: boolean;
 	/** Custom logger instance. If not provided, falls back to console. */
 	logger?: Logger;
 }
@@ -57,7 +55,7 @@ export interface WebRtcManagerConfig {
  * Factory interface for creating WebRTC primitives.
  * Allows dependency injection of browser APIs for testing and flexibility.
  */
-export interface WebRtcFactory {
+export interface WebRTCFactory {
 	/**
 	 * Creates a new RTCPeerConnection instance.
 	 * @param config - Optional RTCConfiguration for ICE servers, certificates, etc.
@@ -81,7 +79,7 @@ export interface WebRtcFactory {
  * Possible states of the WebRTC connection lifecycle.
  * The manager transitions between these states based on connection events.
  */
-export enum WebRtcState {
+export enum WebRTCState {
 	/** Initial state, no resources allocated. */
 	IDLE = "IDLE",
 	/** Creating peer connection and setting up media tracks. */
@@ -102,7 +100,7 @@ export enum WebRtcState {
  * Internal FSM events that trigger state transitions.
  * These events are dispatched internally by the manager methods.
  */
-export enum WebRtcFsmEvent {
+export enum WebRTCFsmEvent {
 	/** Triggers transition from IDLE to INITIALIZING. */
 	INIT = "initialize",
 	/** Triggers transition to CONNECTING state. */
@@ -123,9 +121,9 @@ export enum WebRtcFsmEvent {
  * Type definitions for all WebRTC manager events and their payloads.
  * Use with the `on()` method to subscribe to specific events.
  */
-export interface WebRtcEvents {
-	/** Emitted when connection state changes. Payload: the new WebRtcState. */
-	state_change: WebRtcState;
+export interface WebRTCEvents {
+	/** Emitted when connection state changes. Payload: the new WebRTCState. */
+	state_change: WebRTCState;
 	/** Emitted when local media stream changes. Payload: MediaStream or null if disabled. */
 	local_stream: MediaStream | null;
 	/** Emitted when remote media stream is received. Payload: MediaStream or null. */

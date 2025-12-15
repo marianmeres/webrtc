@@ -1,7 +1,7 @@
-import { WebRtcManager } from "../src/webrtc-manager.ts";
-import { MockWebRtcFactory } from "./mocks.ts";
+import { WebRTCManager } from "../src/webrtc-manager.ts";
+import { MockWebRTCFactory } from "./mocks.ts";
 
-const factory = new MockWebRtcFactory();
-const manager = new WebRtcManager(factory);
+const factory = new MockWebRTCFactory();
+const manager = new WebRTCManager(factory);
 
 console.log(manager.toMermaid());

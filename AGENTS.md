@@ -41,10 +41,10 @@ development:
 src/
   mod.ts              # Entry point, re-exports all public APIs
   types.ts            # Type definitions (interfaces, enums)
-  webrtc-manager.ts   # Main WebRtcManager class
+  webrtc-manager.ts   # Main WebRTCManager class
 
 tests/
-  mocks.ts                    # Mock WebRtcFactory for testing
+  mocks.ts                    # Mock WebRTCFactory for testing
   webrtc-manager.test.ts      # Deno unit tests
   browser/
     p2p-tests.ts              # Browser integration tests
@@ -65,7 +65,7 @@ scripts/
 
 ## State Machine
 
-### States (WebRtcState)
+### States (WebRTCState)
 
 | State | Description | Valid Outgoing Transitions |
 |-------|-------------|---------------------------|
@@ -77,7 +77,7 @@ scripts/
 | DISCONNECTED | Connection closed, resources may be cleaned up | CONNECTING, RECONNECTING, IDLE |
 | ERROR | Error state, requires reset() to recover | IDLE |
 
-### Events (WebRtcFsmEvent)
+### Events (WebRTCFsmEvent)
 
 | Event | Value | Description |
 |-------|-------|-------------|
@@ -114,7 +114,7 @@ ERROR         --RESET-->       IDLE
 ### Constructor
 
 ```typescript
-new WebRtcManager<TContext = unknown>(factory: WebRtcFactory, config?: WebRtcManagerConfig)
+new WebRTCManager<TContext = unknown>(factory: WebRTCFactory, config?: WebRTCManagerConfig)
 ```
 
 **Type Parameter:** `TContext` - Optional type for the `context` property (default: `unknown`)
@@ -134,27 +134,26 @@ interface Logger {
 
 Each method returns a string representation of the first argument, enabling patterns like `throw new Error(logger.error("msg"))`.
 
-### WebRtcFactory Interface
+### WebRTCFactory Interface
 
 ```typescript
-interface WebRtcFactory {
+interface WebRTCFactory {
   createPeerConnection(config?: RTCConfiguration): RTCPeerConnection;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   enumerateDevices(): Promise<MediaDeviceInfo[]>;
 }
 ```
 
-### WebRtcManagerConfig Interface
+### WebRTCManagerConfig Interface
 
 ```typescript
-interface WebRtcManagerConfig {
+interface WebRTCManagerConfig {
   peerConfig?: RTCConfiguration;      // ICE servers, certificates
   enableMicrophone?: boolean;         // Default: false
   dataChannelLabel?: string;          // Auto-create data channel
   autoReconnect?: boolean;            // Default: false
   maxReconnectAttempts?: number;      // Default: 5
   reconnectDelay?: number;            // Default: 1000ms
-  debug?: boolean;                    // Default: false
   logger?: Logger;                    // Custom logger, falls back to console
 }
 ```
@@ -172,7 +171,7 @@ interface GatherIceCandidatesOptions {
 
 | Property | Type | Description |
 |----------|------|-------------|
-| state | WebRtcState | Current FSM state |
+| state | WebRTCState | Current FSM state |
 | localStream | MediaStream \| null | Local audio stream |
 | remoteStream | MediaStream \| null | Remote audio stream |
 | dataChannels | ReadonlyMap<string, RTCDataChannel> | Active data channels |
@@ -223,7 +222,7 @@ interface GatherIceCandidatesOptions {
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| on | `(event: keyof WebRtcEvents, handler: (data: any) => void): () => void` | Subscribe to specific event |
+| on | `(event: keyof WebRTCEvents, handler: (data: any) => void): () => void` | Subscribe to specific event |
 | subscribe | `(handler: (state: OverallState) => void): () => void` | Subscribe to overall state (Svelte compatible) |
 
 ### Utility Methods
@@ -236,7 +235,7 @@ interface GatherIceCandidatesOptions {
 
 | Constant | Value | Payload Type |
 |----------|-------|--------------|
-| EVENT_STATE_CHANGE | "state_change" | WebRtcState |
+| EVENT_STATE_CHANGE | "state_change" | WebRTCState |
 | EVENT_LOCAL_STREAM | "local_stream" | MediaStream \| null |
 | EVENT_REMOTE_STREAM | "remote_stream" | MediaStream \| null |
 | EVENT_DATA_CHANNEL_OPEN | "data_channel_open" | RTCDataChannel |
@@ -337,7 +336,7 @@ deno task serve:example # Run signaling server
 ### Minimal P2P Setup
 
 ```typescript
-const manager = new WebRtcManager(factory, { enableMicrophone: true });
+const manager = new WebRTCManager(factory, { enableMicrophone: true });
 await manager.initialize();
 await manager.connect();
 const offer = await manager.createOffer();
@@ -348,7 +347,7 @@ await manager.setLocalDescription(offer);
 ### With Data Channel
 
 ```typescript
-const manager = new WebRtcManager(factory, { dataChannelLabel: "chat" });
+const manager = new WebRTCManager(factory, { dataChannelLabel: "chat" });
 manager.on("data_channel_message", ({ data }) => console.log(data));
 // After connection...
 manager.sendData("chat", "Hello!");
@@ -358,7 +357,7 @@ manager.sendData("chat", "Hello!");
 
 ```svelte
 <script>
-const manager = new WebRtcManager(factory, config);
+const manager = new WebRTCManager(factory, config);
 // $manager reactive access to state
 </script>
 {$manager.state}
@@ -367,7 +366,7 @@ const manager = new WebRtcManager(factory, config);
 ### Auto-reconnection Handling
 
 ```typescript
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   autoReconnect: true,
   maxReconnectAttempts: 5,
   reconnectDelay: 1000,

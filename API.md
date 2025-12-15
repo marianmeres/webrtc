@@ -4,7 +4,7 @@ Complete API documentation for `@marianmeres/webrtc`.
 
 ## Table of Contents
 
-- [WebRtcManager](#webrtcmanager)
+- [WebRTCManager](#webrtcmanager)
   - [Constructor](#constructor)
   - [Properties](#properties)
   - [Lifecycle Methods](#lifecycle-methods)
@@ -14,24 +14,24 @@ Complete API documentation for `@marianmeres/webrtc`.
   - [Event Methods](#event-methods)
   - [Utility Methods](#utility-methods)
 - [Types](#types)
-  - [WebRtcFactory](#webrtcfactory)
-  - [WebRtcManagerConfig](#webrtcmanagerconfig)
-  - [WebRtcState](#webrtcstate)
-  - [WebRtcFsmEvent](#webrtcfsmevent)
-  - [WebRtcEvents](#webrtcevents)
+  - [WebRTCFactory](#webrtcfactory)
+  - [WebRTCManagerConfig](#webrtcmanagerconfig)
+  - [WebRTCState](#webrtcstate)
+  - [WebRTCFsmEvent](#webrtcfsmevent)
+  - [WebRTCEvents](#webrtcevents)
 - [Event Constants](#event-constants)
 - [State Machine](#state-machine)
 
 ---
 
-## WebRtcManager
+## WebRTCManager
 
 The main class for managing WebRTC connections.
 
 ### Constructor
 
 ```typescript
-new WebRtcManager<TContext = unknown>(factory: WebRtcFactory, config?: WebRtcManagerConfig)
+new WebRTCManager<TContext = unknown>(factory: WebRTCFactory, config?: WebRTCManagerConfig)
 ```
 
 **Type Parameters:**
@@ -44,13 +44,13 @@ new WebRtcManager<TContext = unknown>(factory: WebRtcFactory, config?: WebRtcMan
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| factory | `WebRtcFactory` | Yes | Factory for creating WebRTC primitives |
-| config | `WebRtcManagerConfig` | No | Configuration options |
+| factory | `WebRTCFactory` | Yes | Factory for creating WebRTC primitives |
+| config | `WebRTCManagerConfig` | No | Configuration options |
 
 **Example:**
 
 ```typescript
-import { WebRtcManager } from '@marianmeres/webrtc';
+import { WebRTCManager } from '@marianmeres/webrtc';
 
 const factory = {
   createPeerConnection: (config) => new RTCPeerConnection(config),
@@ -58,7 +58,7 @@ const factory = {
   enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
 };
 
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
   enableMicrophone: true,
   autoReconnect: true,
@@ -72,12 +72,12 @@ const manager = new WebRtcManager(factory, {
 #### state
 
 ```typescript
-get state(): WebRtcState
+get state(): WebRTCState
 ```
 
 Returns the current state of the WebRTC connection.
 
-**Returns:** `WebRtcState` - One of: `IDLE`, `INITIALIZING`, `CONNECTING`, `CONNECTED`, `RECONNECTING`, `DISCONNECTED`, `ERROR`
+**Returns:** `WebRTCState` - One of: `IDLE`, `INITIALIZING`, `CONNECTING`, `CONNECTED`, `RECONNECTING`, `DISCONNECTED`, `ERROR`
 
 ---
 
@@ -145,12 +145,12 @@ User-defined context object for storing arbitrary data associated with this mana
 
 ```typescript
 // With type parameter for full type safety:
-const manager = new WebRtcManager<{ audioStream: MediaStream; sessionId: string }>(factory);
+const manager = new WebRTCManager<{ audioStream: MediaStream; sessionId: string }>(factory);
 manager.context = { audioStream: myStream, sessionId: '123' };
 manager.context.audioStream; // typed as MediaStream
 
 // Without type parameter (backwards compatible):
-const manager = new WebRtcManager(factory);
+const manager = new WebRTCManager(factory);
 manager.context = { anything: 'goes' };
 ```
 
@@ -614,9 +614,9 @@ stats?.forEach(report => {
 #### on()
 
 ```typescript
-on<K extends keyof WebRtcEvents>(
+on<K extends keyof WebRTCEvents>(
   event: K,
-  handler: (data: WebRtcEvents[K]) => void
+  handler: (data: WebRTCEvents[K]) => void
 ): () => void
 ```
 
@@ -626,7 +626,7 @@ Subscribe to a specific WebRTC event.
 
 | Name | Type | Description |
 |------|------|-------------|
-| event | `keyof WebRtcEvents` | Event name |
+| event | `keyof WebRTCEvents` | Event name |
 | handler | `function` | Callback receiving event data |
 
 **Returns:** `() => void` - Unsubscribe function
@@ -661,7 +661,7 @@ Subscribe to the overall state of the manager. Svelte store compatible - immedia
 
 ```typescript
 {
-  state: WebRtcState;
+  state: WebRTCState;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   dataChannels: ReadonlyMap<string, RTCDataChannel>;
@@ -675,7 +675,7 @@ Subscribe to the overall state of the manager. Svelte store compatible - immedia
 
 ```svelte
 <script>
-  const manager = new WebRtcManager(factory, config);
+  const manager = new WebRTCManager(factory, config);
 </script>
 
 <p>State: {$manager.state}</p>
@@ -736,20 +736,19 @@ import { clog } from '@marianmeres/clog';
 
 const logger = clog('WebRTC');
 
-const manager = new WebRtcManager(factory, {
-  debug: true,
+const manager = new WebRTCManager(factory, {
   logger: logger,
 });
 ```
 
 ---
 
-### WebRtcFactory
+### WebRTCFactory
 
 Interface for dependency injection of WebRTC primitives.
 
 ```typescript
-interface WebRtcFactory {
+interface WebRTCFactory {
   createPeerConnection(config?: RTCConfiguration): RTCPeerConnection;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   enumerateDevices(): Promise<MediaDeviceInfo[]>;
@@ -759,7 +758,7 @@ interface WebRtcFactory {
 **Browser Implementation:**
 
 ```typescript
-const factory: WebRtcFactory = {
+const factory: WebRTCFactory = {
   createPeerConnection: (config) => new RTCPeerConnection(config),
   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
   enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
@@ -768,12 +767,12 @@ const factory: WebRtcFactory = {
 
 ---
 
-### WebRtcManagerConfig
+### WebRTCManagerConfig
 
-Configuration options for WebRtcManager.
+Configuration options for WebRTCManager.
 
 ```typescript
-interface WebRtcManagerConfig {
+interface WebRTCManagerConfig {
   /** RTCConfiguration for ICE servers, certificates, etc. */
   peerConfig?: RTCConfiguration;
 
@@ -802,9 +801,6 @@ interface WebRtcManagerConfig {
     strategy: "ice-restart" | "full";
   }) => boolean;
 
-  /** Enable debug logging. Default: false */
-  debug?: boolean;
-
   /** Custom logger instance. If not provided, falls back to console. */
   logger?: Logger;
 }
@@ -812,12 +808,12 @@ interface WebRtcManagerConfig {
 
 ---
 
-### WebRtcState
+### WebRTCState
 
 Enum of possible connection states.
 
 ```typescript
-enum WebRtcState {
+enum WebRTCState {
   IDLE = "IDLE",
   INITIALIZING = "INITIALIZING",
   CONNECTING = "CONNECTING",
@@ -840,12 +836,12 @@ enum WebRtcState {
 
 ---
 
-### WebRtcFsmEvent
+### WebRTCFsmEvent
 
 Internal FSM events (for reference).
 
 ```typescript
-enum WebRtcFsmEvent {
+enum WebRTCFsmEvent {
   INIT = "initialize",
   CONNECT = "connect",
   CONNECTED = "connected",
@@ -858,13 +854,13 @@ enum WebRtcFsmEvent {
 
 ---
 
-### WebRtcEvents
+### WebRTCEvents
 
 Type definition for all events and their payloads.
 
 ```typescript
-interface WebRtcEvents {
-  state_change: WebRtcState;
+interface WebRTCEvents {
+  state_change: WebRTCState;
   local_stream: MediaStream | null;
   remote_stream: MediaStream | null;
   data_channel_open: RTCDataChannel;
@@ -883,11 +879,11 @@ interface WebRtcEvents {
 
 ## Event Constants
 
-Static event name constants on `WebRtcManager`.
+Static event name constants on `WebRTCManager`.
 
 | Constant | Value | Payload |
 |----------|-------|---------|
-| `EVENT_STATE_CHANGE` | `"state_change"` | `WebRtcState` |
+| `EVENT_STATE_CHANGE` | `"state_change"` | `WebRTCState` |
 | `EVENT_LOCAL_STREAM` | `"local_stream"` | `MediaStream \| null` |
 | `EVENT_REMOTE_STREAM` | `"remote_stream"` | `MediaStream \| null` |
 | `EVENT_DATA_CHANNEL_OPEN` | `"data_channel_open"` | `RTCDataChannel` |
@@ -903,7 +899,7 @@ Static event name constants on `WebRtcManager`.
 **Usage:**
 
 ```typescript
-manager.on(WebRtcManager.EVENT_ICE_CANDIDATE, (candidate) => {
+manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
   // Send to remote peer
 });
 ```
@@ -1003,7 +999,7 @@ Use the `shouldReconnect` callback to suppress reconnection when the peer discon
 ```typescript
 let peerLeftIntentionally = false;
 
-const manager = new WebRtcManager(factory, {
+const manager = new WebRTCManager(factory, {
   autoReconnect: true,
   shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
     // Return false to suppress reconnection
