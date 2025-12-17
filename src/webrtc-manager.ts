@@ -112,6 +112,7 @@ export class WebRTCManager<TContext = unknown> {
 		// Initialize FSM
 		this.#fsm = new FSM({
 			initial: WebRTCState.IDLE,
+			logger: this.#logger,
 			states: {
 				[WebRTCState.IDLE]: {
 					on: { [WebRTCFsmEvent.INIT]: WebRTCState.INITIALIZING },
