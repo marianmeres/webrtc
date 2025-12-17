@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/webrtc",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "exports": "./src/mod.ts",
   "tasks": {
     "example:build": "deno run -A jsr:@marianmeres/deno-build --outdir ./example/dist --outfile webrtc.js",
