@@ -262,7 +262,7 @@ export class WebRTCManager<TContext = unknown> {
 			const devices = await this.#factory.enumerateDevices();
 			return devices.filter((d) => d.kind === "audioinput");
 		} catch (e) {
-			this.#logError("Failed to enumerate devices:", e);
+			this.#logError("Failed to enumerate devices.", e);
 			return [];
 		}
 	}
@@ -322,7 +322,7 @@ export class WebRTCManager<TContext = unknown> {
 
 			return true;
 		} catch (e) {
-			this.#logError("Failed to switch microphone:", e);
+			this.#logError("Failed to switch microphone.", e);
 			this.#handleError(e);
 			return false;
 		}
@@ -335,24 +335,23 @@ export class WebRTCManager<TContext = unknown> {
 	async initialize(): Promise<void> {
 		if (this.state !== WebRTCState.IDLE) {
 			this.#logger.debug(
-				"initialize() called but state is not IDLE:",
-				this.state
+				`Initialization skipped because state is ${this.state}, not IDLE.`
 			);
 			return;
 		}
-		this.#logger.debug("Initializing...");
+		this.#logger.debug("Initializing peer connection.");
 		this.#dispatch(WebRTCFsmEvent.INIT);
 
 		try {
 			this.#pc = this.#factory.createPeerConnection(this.#config.peerConfig);
-			this.#logger.debug("Peer connection created");
+			this.#logger.debug("Peer connection created.");
 			this.#setupPcListeners();
 
 			// Setup device change detection now that we have a connection
 			this.#setupDeviceChangeListener();
 
 			if (this.#config.enableMicrophone) {
-				this.#logger.debug("Enabling microphone (config enabled)");
+				this.#logger.debug("Enabling microphone as per configuration.");
 				const success = await this.enableMicrophone(true);
 				if (!success) {
 					this.#pubsub.publish(WebRTCManager.EVENT_MICROPHONE_FAILED, {
@@ -363,17 +362,16 @@ export class WebRTCManager<TContext = unknown> {
 				// Always setup to receive audio, even if we don't enable microphone
 				// This ensures the SDP includes audio media line
 				this.#pc.addTransceiver("audio", { direction: "recvonly" });
-				this.#logger.debug("Added recvonly audio transceiver");
+				this.#logger.debug("Added receive-only audio transceiver.");
 			}
 
 			if (this.#config.dataChannelLabel) {
 				this.#logger.debug(
-					"Creating default data channel:",
-					this.#config.dataChannelLabel
+					`Creating default data channel '${this.#config.dataChannelLabel}'.`
 				);
 				this.createDataChannel(this.#config.dataChannelLabel);
 			}
-			this.#logger.debug("Initialization complete");
+			this.#logger.debug("Initialization complete.");
 		} catch (e) {
 			this.#logError(e);
 			this.#handleError(e);
@@ -385,17 +383,17 @@ export class WebRTCManager<TContext = unknown> {
 	 * If disconnected, reinitializes the peer connection.
 	 */
 	async connect(): Promise<void> {
-		this.#logger.debug("connect() called, current state:", this.state);
+		this.#logger.debug(`Connect called with current state ${this.state}.`);
 
 		// Initialize if needed
 		if (this.state === WebRTCState.IDLE) {
-			this.#logger.debug("State is IDLE, initializing first");
+			this.#logger.debug("State is IDLE, initializing first.");
 			await this.initialize();
 		}
 
 		// Reinitialize if disconnected (PeerConnection was closed)
 		if (this.state === WebRTCState.DISCONNECTED) {
-			this.#logger.debug("State is DISCONNECTED, reinitializing");
+			this.#logger.debug("State is DISCONNECTED, reinitializing.");
 			// Clean up old connection
 			this.#cleanup();
 			// Reset to IDLE and reinitialize
@@ -409,11 +407,11 @@ export class WebRTCManager<TContext = unknown> {
 			this.state === WebRTCState.CONNECTED ||
 			this.state === WebRTCState.CONNECTING
 		) {
-			this.#logger.debug("Already connected or connecting, skipping");
+			this.#logger.debug("Already connected or connecting, skipping.");
 			return;
 		}
 
-		this.#logger.debug("Transitioning to CONNECTING");
+		this.#logger.debug("Transitioning to CONNECTING state.");
 		this.#dispatch(WebRTCFsmEvent.CONNECT);
 	}
 
@@ -423,22 +421,21 @@ export class WebRTCManager<TContext = unknown> {
 	 * @returns True if successful, false if failed to get user media.
 	 */
 	async enableMicrophone(enable: boolean): Promise<boolean> {
-		this.#logger.debug("enableMicrophone() called:", enable);
+		this.#logger.debug(`Enable microphone called with value ${enable}.`);
 
 		if (enable) {
 			if (this.#localStream) {
-				this.#logger.debug("Microphone already enabled");
+				this.#logger.debug("Microphone is already enabled.");
 				return true;
 			}
 			try {
-				this.#logger.debug("Requesting user media...");
+				this.#logger.debug("Requesting user media.");
 				const stream = await this.#factory.getUserMedia({
 					audio: true,
 					video: false,
 				});
 				this.#logger.debug(
-					"User media obtained, tracks:",
-					stream.getAudioTracks().length
+					`User media obtained with ${stream.getAudioTracks().length} track(s).`
 				);
 				this.#localStream = stream;
 				this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, stream);
@@ -456,19 +453,19 @@ export class WebRTCManager<TContext = unknown> {
 						await audioTransceiver.sender.replaceTrack(track);
 						// Update direction to sendrecv
 						audioTransceiver.direction = "sendrecv";
-						this.#logger.debug("Replaced track in existing transceiver");
+						this.#logger.debug("Replaced track in existing transceiver.");
 					} else {
 						// Add track normally
 						stream.getTracks().forEach((track) => {
 							this.#pc!.addTrack(track, stream);
 						});
-						this.#logger.debug("Added tracks to peer connection");
+						this.#logger.debug("Added tracks to peer connection.");
 					}
 				}
-				this.#logger.debug("Microphone enabled successfully");
+				this.#logger.debug("Microphone enabled successfully.");
 				return true;
 			} catch (e) {
-				this.#logError("Failed to get user media:", e);
+				this.#logError("Failed to get user media.", e);
 				this.#pubsub.publish(WebRTCManager.EVENT_MICROPHONE_FAILED, {
 					error: e,
 				});
@@ -476,10 +473,10 @@ export class WebRTCManager<TContext = unknown> {
 			}
 		} else {
 			if (!this.#localStream) {
-				this.#logger.debug("Microphone already disabled");
+				this.#logger.debug("Microphone is already disabled.");
 				return true;
 			}
-			this.#logger.debug("Disabling microphone...");
+			this.#logger.debug("Disabling microphone.");
 			this.#localStream.getTracks().forEach((track) => {
 				track.stop();
 				// Remove from PC if needed, or just stop sending
@@ -493,7 +490,7 @@ export class WebRTCManager<TContext = unknown> {
 			});
 			this.#localStream = null;
 			this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, null);
-			this.#logger.debug("Microphone disabled");
+			this.#logger.debug("Microphone disabled.");
 			return true;
 		}
 	}
@@ -503,7 +500,7 @@ export class WebRTCManager<TContext = unknown> {
 	 * Transitions to DISCONNECTED state.
 	 */
 	disconnect(): void {
-		this.#logger.debug("disconnect() called");
+		this.#logger.debug("Disconnect called.");
 		this.#cleanup();
 		this.#dispatch(WebRTCFsmEvent.DISCONNECT);
 	}
@@ -513,7 +510,7 @@ export class WebRTCManager<TContext = unknown> {
 	 * Cleans up all resources and allows reinitialization.
 	 */
 	reset(): void {
-		this.#logger.debug("reset() called, current state:", this.state);
+		this.#logger.debug(`Reset called with current state ${this.state}.`);
 		this.#cleanup();
 
 		// Reset from any non-IDLE state
@@ -531,7 +528,7 @@ export class WebRTCManager<TContext = unknown> {
 				this.#dispatch(WebRTCFsmEvent.RESET);
 			}
 		}
-		this.#logger.debug("Reset complete, state:", this.state);
+		this.#logger.debug(`Reset complete, state is now ${this.state}.`);
 	}
 
 	/**
@@ -545,16 +542,16 @@ export class WebRTCManager<TContext = unknown> {
 		label: string,
 		options?: RTCDataChannelInit
 	): RTCDataChannel | null {
-		this.#logger.debug("createDataChannel() called:", label);
+		this.#logger.debug(`Create data channel called for '${label}'.`);
 
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot create data channel: peer connection not initialized"
+				"Cannot create data channel because peer connection is not initialized."
 			);
 			return null;
 		}
 		if (this.#dataChannels.has(label)) {
-			this.#logger.debug("Returning existing data channel:", label);
+			this.#logger.debug(`Returning existing data channel '${label}'.`);
 			return this.#dataChannels.get(label)!;
 		}
 
@@ -562,7 +559,7 @@ export class WebRTCManager<TContext = unknown> {
 			const dc = this.#pc.createDataChannel(label, options);
 			this.#setupDataChannelListeners(dc);
 			this.#dataChannels.set(label, dc);
-			this.#logger.debug("Data channel created:", label);
+			this.#logger.debug(`Data channel '${label}' created.`);
 			return dc;
 		} catch (e) {
 			this.#logError(e);
@@ -593,12 +590,12 @@ export class WebRTCManager<TContext = unknown> {
 	): boolean {
 		const channel = this.#dataChannels.get(label);
 		if (!channel) {
-			this.#logger.debug(`Data channel '${label}' not found`);
+			this.#logger.debug(`Data channel '${label}' not found.`);
 			return false;
 		}
 		if (channel.readyState !== "open") {
 			this.#logger.debug(
-				`Data channel '${label}' is not open (state: ${channel.readyState})`
+				`Data channel '${label}' is not open, state is ${channel.readyState}.`
 			);
 			return false;
 		}
@@ -623,16 +620,16 @@ export class WebRTCManager<TContext = unknown> {
 	async createOffer(
 		options?: RTCOfferOptions
 	): Promise<RTCSessionDescriptionInit | null> {
-		this.#logger.debug("createOffer() called");
+		this.#logger.debug("Create offer called.");
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot create offer: peer connection not initialized"
+				"Cannot create offer because peer connection is not initialized."
 			);
 			return null;
 		}
 		try {
 			const offer = await this.#pc.createOffer(options);
-			this.#logger.debug("Offer created:", offer.type);
+			this.#logger.debug(`Offer of type '${offer.type}' created.`);
 			return offer;
 		} catch (e) {
 			this.#logError(e);
@@ -649,16 +646,16 @@ export class WebRTCManager<TContext = unknown> {
 	async createAnswer(
 		options?: RTCAnswerOptions
 	): Promise<RTCSessionDescriptionInit | null> {
-		this.#logger.debug("createAnswer() called");
+		this.#logger.debug("Create answer called.");
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot create answer: peer connection not initialized"
+				"Cannot create answer because peer connection is not initialized."
 			);
 			return null;
 		}
 		try {
 			const answer = await this.#pc.createAnswer(options);
-			this.#logger.debug("Answer created:", answer.type);
+			this.#logger.debug(`Answer of type '${answer.type}' created.`);
 			return answer;
 		} catch (e) {
 			this.#logError(e);
@@ -675,16 +672,16 @@ export class WebRTCManager<TContext = unknown> {
 	async setLocalDescription(
 		description: RTCSessionDescriptionInit
 	): Promise<boolean> {
-		this.#logger.debug("setLocalDescription() called:", description.type);
+		this.#logger.debug(`Set local description called with type '${description.type}'.`);
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot set local description: peer connection not initialized"
+				"Cannot set local description because peer connection is not initialized."
 			);
 			return false;
 		}
 		try {
 			await this.#pc.setLocalDescription(description);
-			this.#logger.debug("Local description set successfully");
+			this.#logger.debug("Local description set successfully.");
 			return true;
 		} catch (e) {
 			this.#logError(e);
@@ -701,16 +698,16 @@ export class WebRTCManager<TContext = unknown> {
 	async setRemoteDescription(
 		description: RTCSessionDescriptionInit
 	): Promise<boolean> {
-		this.#logger.debug("setRemoteDescription() called:", description.type);
+		this.#logger.debug(`Set remote description called with type '${description.type}'.`);
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot set remote description: peer connection not initialized"
+				"Cannot set remote description because peer connection is not initialized."
 			);
 			return false;
 		}
 		try {
 			await this.#pc.setRemoteDescription(description);
-			this.#logger.debug("Remote description set successfully");
+			this.#logger.debug("Remote description set successfully.");
 			return true;
 		} catch (e) {
 			this.#logError(e);
@@ -728,19 +725,18 @@ export class WebRTCManager<TContext = unknown> {
 		candidate: RTCIceCandidateInit | null
 	): Promise<boolean> {
 		this.#logger.debug(
-			"addIceCandidate() called:",
-			candidate ? "candidate" : "null (end-of-candidates)"
+			`Add ICE candidate called with ${candidate ? "a candidate" : "null (end of candidates)"}.`
 		);
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot add ICE candidate: peer connection not initialized"
+				"Cannot add ICE candidate because peer connection is not initialized."
 			);
 			return false;
 		}
 		try {
 			if (candidate) {
 				await this.#pc.addIceCandidate(candidate);
-				this.#logger.debug("ICE candidate added");
+				this.#logger.debug("ICE candidate added successfully.");
 			}
 			return true;
 		} catch (e) {
@@ -756,17 +752,17 @@ export class WebRTCManager<TContext = unknown> {
 	 * @returns True if successful, false otherwise.
 	 */
 	async iceRestart(): Promise<boolean> {
-		this.#logger.debug("iceRestart() called");
+		this.#logger.debug("ICE restart called.");
 		if (!this.#pc) {
 			this.#logger.debug(
-				"Cannot perform ICE restart: peer connection not initialized"
+				"Cannot perform ICE restart because peer connection is not initialized."
 			);
 			return false;
 		}
 		try {
 			const offer = await this.#pc.createOffer({ iceRestart: true });
 			await this.#pc.setLocalDescription(offer);
-			this.#logger.debug("ICE restart initiated");
+			this.#logger.debug("ICE restart initiated.");
 			return true;
 		} catch (e) {
 			this.#logError(e);
@@ -791,11 +787,11 @@ export class WebRTCManager<TContext = unknown> {
 		const pc = this.#pc;
 
 		if (pc.iceGatheringState === "complete") {
-			this.#logger.debug("ICE gathering already complete");
+			this.#logger.debug("ICE gathering is already complete.");
 			return Promise.resolve();
 		}
 
-		this.#logger.debug("Waiting for ICE gathering to complete...");
+		this.#logger.debug("Waiting for ICE gathering to complete.");
 
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -811,7 +807,7 @@ export class WebRTCManager<TContext = unknown> {
 
 			const checkState = () => {
 				if (pc.iceGatheringState === "complete") {
-					this.#logger.debug("ICE gathering complete (via state change)");
+					this.#logger.debug("ICE gathering complete via state change.");
 					cleanup();
 					resolve();
 				}
@@ -820,7 +816,7 @@ export class WebRTCManager<TContext = unknown> {
 			const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
 				onCandidate?.(event.candidate);
 				if (event.candidate === null) {
-					this.#logger.debug("ICE gathering complete (null candidate)");
+					this.#logger.debug("ICE gathering complete via null candidate.");
 					cleanup();
 					resolve();
 				}
@@ -871,12 +867,7 @@ export class WebRTCManager<TContext = unknown> {
 
 		if (oldState !== newState) {
 			this.#logger.debug(
-				"State transition:",
-				oldState,
-				"->",
-				newState,
-				"(event:",
-				event + ")"
+				`State transitioned from ${oldState} to ${newState} on event ${event}.`
 			);
 			this.#pubsub.publish(WebRTCManager.EVENT_STATE_CHANGE, newState);
 		}
@@ -905,11 +896,11 @@ export class WebRTCManager<TContext = unknown> {
 
 	#setupPcListeners() {
 		if (!this.#pc) return;
-		this.#logger.debug("Setting up peer connection listeners");
+		this.#logger.debug("Setting up peer connection listeners.");
 
 		this.#pc.onconnectionstatechange = () => {
 			const state = this.#pc!.connectionState;
-			this.#logger.debug("Connection state changed:", state);
+			this.#logger.debug(`Connection state changed to ${state}.`);
 			if (state === "connected") {
 				// Only dispatch if in CONNECTING state (FSM can handle CONNECTED event)
 				// This guards against late connection success after user has disconnected
@@ -923,7 +914,7 @@ export class WebRTCManager<TContext = unknown> {
 					this.#dispatch(WebRTCFsmEvent.CONNECTED);
 				} else {
 					this.#logger.debug(
-						`Ignoring late connection success (current state: ${this.state})`
+						`Ignoring late connection success because current state is ${this.state}.`
 					);
 				}
 			} else if (state === "failed") {
@@ -942,7 +933,7 @@ export class WebRTCManager<TContext = unknown> {
 		};
 
 		this.#pc.ontrack = (event) => {
-			this.#logger.debug("Remote track received:", event.track.kind);
+			this.#logger.debug(`Remote ${event.track.kind} track received.`);
 			if (event.streams && event.streams[0]) {
 				this.#remoteStream = event.streams[0];
 				this.#pubsub.publish(
@@ -954,22 +945,21 @@ export class WebRTCManager<TContext = unknown> {
 
 		this.#pc.ondatachannel = (event) => {
 			const dc = event.channel;
-			this.#logger.debug("Remote data channel received:", dc.label);
+			this.#logger.debug(`Remote data channel '${dc.label}' received.`);
 			this.#setupDataChannelListeners(dc);
 			this.#dataChannels.set(dc.label, dc);
 		};
 
 		this.#pc.onicecandidate = (event) => {
 			this.#logger.debug(
-				"ICE candidate generated:",
-				event.candidate ? "candidate" : "null (gathering complete)"
+				`ICE candidate generated: ${event.candidate ? "candidate" : "null (gathering complete)"}.`
 			);
 			this.#pubsub.publish(WebRTCManager.EVENT_ICE_CANDIDATE, event.candidate);
 		};
 	}
 
 	#cleanup() {
-		this.#logger.debug("Cleanup started");
+		this.#logger.debug("Cleanup started.");
 
 		// Clear any pending reconnect timers
 		if (this.#reconnectTimer !== null) {
@@ -1001,29 +991,29 @@ export class WebRTCManager<TContext = unknown> {
 		});
 		this.#dataChannels.clear();
 		if (dcCount > 0) {
-			this.#logger.debug("Closed", dcCount, "data channel(s)");
+			this.#logger.debug(`Closed ${dcCount} data channel(s).`);
 		}
 
 		// Stop local stream tracks
 		if (this.#localStream) {
 			this.#localStream.getTracks().forEach((track) => track.stop());
 			this.#localStream = null;
-			this.#logger.debug("Local stream stopped");
+			this.#logger.debug("Local stream stopped.");
 		}
 
 		// Close peer connection
 		if (this.#pc) {
 			this.#pc.close();
 			this.#pc = null;
-			this.#logger.debug("Peer connection closed");
+			this.#logger.debug("Peer connection closed.");
 		}
 
 		this.#remoteStream = null;
-		this.#logger.debug("Cleanup complete");
+		this.#logger.debug("Cleanup complete.");
 	}
 
 	#handleConnectionFailure() {
-		this.#logger.debug("Handling connection failure");
+		this.#logger.debug("Handling connection failure.");
 
 		// Only dispatch DISCONNECT if not already in a terminal state
 		if (
@@ -1037,7 +1027,7 @@ export class WebRTCManager<TContext = unknown> {
 		// Check if auto-reconnect is enabled
 		if (!this.#config.autoReconnect) {
 			this.#logger.debug(
-				"Auto-reconnect disabled, not attempting reconnection"
+				"Auto-reconnect is disabled, not attempting reconnection."
 			);
 			return;
 		}
@@ -1046,7 +1036,7 @@ export class WebRTCManager<TContext = unknown> {
 
 		// Check if we've exceeded max attempts
 		if (this.#reconnectAttempts >= maxAttempts) {
-			this.#logger.debug("Max reconnection attempts reached:", maxAttempts);
+			this.#logger.debug(`Maximum reconnection attempts (${maxAttempts}) reached.`);
 			this.#pubsub.publish(WebRTCManager.EVENT_RECONNECT_FAILED, {
 				attempts: this.#reconnectAttempts,
 			});
@@ -1066,7 +1056,7 @@ export class WebRTCManager<TContext = unknown> {
 			});
 			if (!shouldProceed) {
 				this.#logger.debug(
-					"Reconnection suppressed by shouldReconnect callback"
+					"Reconnection suppressed by shouldReconnect callback."
 				);
 				return;
 			}
@@ -1087,11 +1077,9 @@ export class WebRTCManager<TContext = unknown> {
 		// Try ICE restart first (attempts 1-2), then full reconnect
 		const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
 
-		this.#logger.debug("Attempting reconnection:", {
-			attempt: this.#reconnectAttempts,
-			strategy,
-			delay: delay + "ms",
-		});
+		this.#logger.debug(
+			`Attempting reconnection (attempt ${this.#reconnectAttempts}, strategy: ${strategy}, delay: ${delay}ms).`
+		);
 
 		this.#pubsub.publish(WebRTCManager.EVENT_RECONNECTING, {
 			attempt: this.#reconnectAttempts,
@@ -1129,13 +1117,13 @@ export class WebRTCManager<TContext = unknown> {
 						// Only trigger failure if still not connected
 						if (this.state !== WebRTCState.CONNECTED) {
 							this.#logger.debug(
-								"Full reconnection timeout reached, connection not established"
+								"Full reconnection timeout reached, connection was not established."
 							);
 							this.#handleConnectionFailure();
 						}
 					}, timeout) as unknown as number;
 				} catch (e) {
-					this.#logError("Reconnection failed:", e);
+					this.#logError("Reconnection failed.", e);
 					this.#handleConnectionFailure();
 				}
 			}
@@ -1158,7 +1146,7 @@ export class WebRTCManager<TContext = unknown> {
 				const devices = await this.getAudioInputDevices();
 				this.#pubsub.publish(WebRTCManager.EVENT_DEVICE_CHANGED, devices);
 			} catch (e) {
-				this.#logError("Error handling device change:", e);
+				this.#logError("Error handling device change.", e);
 			}
 		};
 
@@ -1189,7 +1177,7 @@ export class WebRTCManager<TContext = unknown> {
 				"User-Initiated Abort"
 			);
 			if (!isUserAbort) {
-				this.#logError("Data channel error:", error);
+				this.#logError("Data channel error occurred.", error);
 				this.#pubsub.publish(WebRTCManager.EVENT_ERROR, error);
 			}
 		};
