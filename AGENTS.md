@@ -4,7 +4,7 @@
 
 ```yaml
 name: "@marianmeres/webrtc"
-version: "1.0.2"
+version: "1.4.5"
 license: MIT
 author: Marian Meres
 repository: https://github.com/marianmeres/webrtc
@@ -27,12 +27,13 @@ A lightweight, framework-agnostic WebRTC manager providing:
 
 ```yaml
 production:
-  - "@marianmeres/fsm": "^2.11.0"
-  - "@marianmeres/pubsub": "^2.4.4"
+  - "@marianmeres/clog": "^3.15.2"
+  - "@marianmeres/fsm": "^2.16.4"
+  - "@marianmeres/pubsub": "^2.4.6"
 development:
-  - "@std/assert": "^1.0.16"
-  - "@std/fs": "^1.0.20"
-  - "@std/path": "^1.1.3"
+  - "@std/assert": "^1.0.18"
+  - "@std/fs": "^1.0.22"
+  - "@std/path": "^1.1.4"
 ```
 
 ## File Structure
@@ -154,6 +155,12 @@ interface WebRTCManagerConfig {
   autoReconnect?: boolean;            // Default: false
   maxReconnectAttempts?: number;      // Default: 5
   reconnectDelay?: number;            // Default: 1000ms
+  fullReconnectTimeout?: number;      // Timeout for full reconnect strategy (default: 30000ms)
+  shouldReconnect?: (context: {       // Callback to control reconnection
+    attempt: number;
+    maxAttempts: number;
+    strategy: "ice-restart" | "full";
+  }) => boolean;
   logger?: Logger;                    // Custom logger, falls back to console
 }
 ```
