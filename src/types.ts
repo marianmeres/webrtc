@@ -23,6 +23,13 @@ export interface WebRTCManagerConfig {
 	peerConfig?: RTCConfiguration;
 	/** Whether to enable microphone initially. Defaults to false. */
 	enableMicrophone?: boolean;
+	/**
+	 * Direction of the audio transceiver added during `initialize()` when the
+	 * microphone is NOT enabled. Defaults to "recvonly".
+	 * Use "sendrecv" if you expect to enable the microphone mid-session and want
+	 * to avoid renegotiation.
+	 */
+	audioDirection?: RTCRtpTransceiverDirection;
 	/** Label for the default data channel. If provided, a data channel will be created on connect. */
 	dataChannelLabel?: string;
 	/** Enable automatic reconnection on connection failure. Defaults to false. */
@@ -152,6 +159,18 @@ export interface WebRTCEvents {
 	microphone_failed: { error?: any; reason?: string };
 	/** Emitted when an error occurs. Payload: the Error object. */
 	error: Error;
+	/**
+	 * Emitted after `iceRestart()` creates and sets a new local offer.
+	 * Consumers MUST forward this offer to the remote peer via signaling for
+	 * the ICE restart to actually succeed.
+	 */
+	ice_restart_offer: RTCSessionDescriptionInit;
+	/**
+	 * Emitted when the peer connection reports that renegotiation is needed
+	 * (e.g. after adding tracks or creating a data channel post-handshake).
+	 * Consumers should create a new offer and re-signal.
+	 */
+	negotiation_needed: undefined;
 }
 
 /**
@@ -161,6 +180,16 @@ export interface WebRTCEvents {
 export interface GatherIceCandidatesOptions {
 	/** Timeout in milliseconds (default: 10000) */
 	timeout?: number;
-	/** Called for each ICE candidate as it's gathered */
-	onCandidate?: (candidate: RTCIceCandidate | null) => void;
+	/**
+	 * Called for each real ICE candidate as it's gathered.
+	 * The terminal `null` (end-of-gathering sentinel) is NOT forwarded —
+	 * use the returned promise's resolution to detect completion.
+	 */
+	onCandidate?: (candidate: RTCIceCandidate) => void;
+	/**
+	 * If true, the returned promise resolves instead of rejecting when the timeout
+	 * elapses. Useful for HTTP-POST signaling where partial candidates are better
+	 * than no candidates at all. Defaults to false (preserving existing behavior).
+	 */
+	resolveOnTimeout?: boolean;
 }

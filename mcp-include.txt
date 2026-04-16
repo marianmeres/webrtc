@@ -1,1 +1,3 @@
-A lightweight, framework-agnostic WebRTC connection manager with FSM-based lifecycle, event-driven architecture, Svelte store compatibility, audio device management, data channels, and auto-reconnection. Signaling transport is not included — users implement their own.
+A lightweight, framework-agnostic WebRTC connection manager with FSM-based lifecycle, 
+event-driven architecture, Svelte store compatibility, audio device management, data channels, 
+and auto-reconnection. Signaling transport is not included — users implement their own.

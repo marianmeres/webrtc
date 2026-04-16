@@ -16,6 +16,7 @@ Complete API documentation for `@marianmeres/webrtc`.
 - [Types](#types)
   - [WebRTCFactory](#webrtcfactory)
   - [WebRTCManagerConfig](#webrtcmanagerconfig)
+  - [GatherIceCandidatesOptions](#gathericecandidatesoptions)
   - [WebRTCState](#webrtcstate)
   - [WebRTCFsmEvent](#webrtcfsmevent)
   - [WebRTCEvents](#webrtcevents)
@@ -99,9 +100,23 @@ Returns the local media stream (microphone audio), or `null` if not initialized.
 get remoteStream(): MediaStream | null
 ```
 
-Returns the remote media stream received from peer, or `null` if not connected.
+Returns the **first** remote media stream received from the peer, or `null` if not connected. Provided for backwards compatibility; prefer `remoteStreams` when the remote side may publish more than one stream.
 
 **Returns:** `MediaStream | null`
+
+---
+
+#### remoteStreams
+
+```typescript
+get remoteStreams(): ReadonlyMap<string, MediaStream>
+```
+
+Returns every remote media stream received so far, keyed by `stream.id`. Populated incrementally as `ontrack` events fire. Useful when the remote peer publishes multiple streams (e.g. separate audio and video, or audio from multiple participants in an SFU-style setup).
+
+**Returns:** `ReadonlyMap<string, MediaStream>`
+
+**Added in:** 2.0
 
 ---
 
@@ -199,6 +214,8 @@ Transitions to the `CONNECTING` state. Automatically calls `initialize()` if in 
 - From `INITIALIZING`: Transitions to `CONNECTING`
 - From `CONNECTED` or `CONNECTING`: No-op
 
+**Side effects (2.0):** Resets the internal reconnect attempts counter when starting a fresh session, so a previously-exhausted reconnect budget does not block new attempts.
+
 **Example:**
 
 ```typescript
@@ -219,6 +236,8 @@ Disconnects the peer connection and cleans up all resources:
 - Stops local media tracks
 - Closes peer connection
 - Clears reconnection timers
+- (2.0) Publishes `local_stream` / `remote_stream` with `null` payload so UIs drop stale stream references
+- (2.0) Resets the reconnect attempts counter
 
 **Transitions:** Any state → `DISCONNECTED`
 
@@ -241,12 +260,36 @@ Resets the manager to `IDLE` state from any state. Performs full cleanup and all
 
 **Transitions:** Any state → `IDLE`
 
+**Changed in 2.0:** Now works correctly from every state. In 1.x, calling `reset()` from `INITIALIZING` / `CONNECTING` / `CONNECTED` silently no-op'd because those FSM transitions didn't exist.
+
 **Example:**
 
 ```typescript
 manager.reset();
 console.log(manager.state); // "IDLE"
 // Can now call initialize() again
+```
+
+---
+
+#### dispose()
+
+```typescript
+dispose(): void
+```
+
+Fully disposes the manager. Unsubscribes every listener registered via `on()` or `subscribe()`, closes the peer connection, stops streams, and transitions to `IDLE`. Idempotent. After calling this, the manager should not be reused.
+
+Use this in framework teardown hooks (React `useEffect` cleanup, Svelte `onDestroy`, Vue `onUnmounted`, etc.) instead of tracking each returned unsubscribe handle manually.
+
+**Added in:** 2.0
+
+**Example:**
+
+```typescript
+onDestroy(() => {
+  manager.dispose();
+});
 ```
 
 ---
@@ -301,6 +344,8 @@ Switches the active microphone to a different audio input device.
 **Returns:** `boolean` - `true` if successful, `false` otherwise
 
 **Requirements:** Peer connection must be initialized and microphone must be enabled.
+
+**Changed in 2.0:** Also promotes `recvonly` / `inactive` audio transceivers to `sendrecv`. In 1.x, switching the mic on a connection initialized with `enableMicrophone: false` would replace the track but leave the direction as `recvonly`, silently producing no audio.
 
 **Example:**
 
@@ -551,15 +596,47 @@ await manager.addIceCandidate(remoteCandidate);
 async iceRestart(): Promise<boolean>
 ```
 
-Performs an ICE restart to recover from connection issues. Creates a new offer with the `iceRestart` flag.
+Performs an ICE restart to recover from connection issues. Creates a new offer with the `iceRestart` flag, sets it as the local description, and emits `ice_restart_offer` with the new offer.
 
 **Returns:** `boolean` - `true` if successful
+
+**Changed in 2.0:** Emits `EVENT_ICE_RESTART_OFFER` with the new local offer. Consumers **must** forward this offer to the remote peer via their signaling channel — otherwise the ICE restart silently has no effect. In 1.x the offer never left the library.
 
 **Example:**
 
 ```typescript
+manager.on(WebRTCManager.EVENT_ICE_RESTART_OFFER, (offer) => {
+  signalingChannel.send({ type: "offer", offer });
+});
+
 const success = await manager.iceRestart();
-// New ICE candidates will be generated
+// New ICE candidates will be generated once the remote side responds
+// to the forwarded offer with an answer.
+```
+
+---
+
+#### gatherIceCandidates()
+
+```typescript
+gatherIceCandidates(options?: GatherIceCandidatesOptions): Promise<void>
+```
+
+Waits for ICE gathering to complete. Useful for HTTP-POST signaling patterns where you need the local description to bundle all candidates before sending.
+
+**Parameters:** See [GatherIceCandidatesOptions](#gathericecandidatesoptions).
+
+**Returns:** `Promise<void>` — resolves when gathering completes, rejects on timeout (unless `resolveOnTimeout: true`) or if the peer connection is not initialized.
+
+**Changed in 2.0:** The `onCandidate` callback no longer receives the terminal `null` sentinel. End-of-gathering is signaled exclusively by the promise resolving.
+
+**Example:**
+
+```typescript
+const offer = await manager.createOffer();
+await manager.setLocalDescription(offer);
+await manager.gatherIceCandidates({ timeout: 5000 });
+// manager.peerConnection.localDescription now has all candidates bundled
 ```
 
 ---
@@ -779,6 +856,15 @@ interface WebRTCManagerConfig {
   /** Enable microphone on initialization. Default: false */
   enableMicrophone?: boolean;
 
+  /**
+   * Direction of the audio transceiver added during `initialize()` when the
+   * microphone is NOT enabled. Default: "recvonly".
+   * Use "sendrecv" if you plan to enable the mic later and want to avoid
+   * renegotiation when the track is added.
+   * Added in 2.0.
+   */
+  audioDirection?: RTCRtpTransceiverDirection;
+
   /** Create a data channel with this label on connect */
   dataChannelLabel?: string;
 
@@ -803,6 +889,34 @@ interface WebRTCManagerConfig {
 
   /** Custom logger instance. If not provided, falls back to console. */
   logger?: Logger;
+}
+```
+
+---
+
+### GatherIceCandidatesOptions
+
+Options for `gatherIceCandidates()`.
+
+```typescript
+interface GatherIceCandidatesOptions {
+  /** Timeout in milliseconds. Default: 10000 */
+  timeout?: number;
+
+  /**
+   * Called for each real ICE candidate as it's gathered.
+   * The terminal `null` (end-of-gathering sentinel) is NOT forwarded —
+   * use the returned promise's resolution to detect completion.
+   */
+  onCandidate?: (candidate: RTCIceCandidate) => void;
+
+  /**
+   * When true, the returned promise resolves instead of rejecting on timeout.
+   * Useful for HTTP-POST signaling where partial candidates are better than none.
+   * Default: false.
+   * Added in 2.0.
+   */
+  resolveOnTimeout?: boolean;
 }
 ```
 
@@ -872,6 +986,10 @@ interface WebRTCEvents {
   device_changed: MediaDeviceInfo[];
   microphone_failed: { error?: any; reason?: string };
   error: Error;
+  /** (2.0) Local offer produced by iceRestart(); forward via signaling. */
+  ice_restart_offer: RTCSessionDescriptionInit;
+  /** (2.0) Forwarded from pc.onnegotiationneeded. */
+  negotiation_needed: undefined;
 }
 ```
 
@@ -884,12 +1002,14 @@ Static event name constants on `WebRTCManager`.
 | Constant | Value | Payload |
 |----------|-------|---------|
 | `EVENT_STATE_CHANGE` | `"state_change"` | `WebRTCState` |
-| `EVENT_LOCAL_STREAM` | `"local_stream"` | `MediaStream \| null` |
-| `EVENT_REMOTE_STREAM` | `"remote_stream"` | `MediaStream \| null` |
+| `EVENT_LOCAL_STREAM` | `"local_stream"` | `MediaStream \| null` (also fires `null` on teardown — 2.0) |
+| `EVENT_REMOTE_STREAM` | `"remote_stream"` | `MediaStream \| null` (also fires `null` on teardown — 2.0) |
 | `EVENT_DATA_CHANNEL_OPEN` | `"data_channel_open"` | `RTCDataChannel` |
 | `EVENT_DATA_CHANNEL_MESSAGE` | `"data_channel_message"` | `{ channel, data }` |
 | `EVENT_DATA_CHANNEL_CLOSE` | `"data_channel_close"` | `RTCDataChannel` |
 | `EVENT_ICE_CANDIDATE` | `"ice_candidate"` | `RTCIceCandidate \| null` |
+| `EVENT_ICE_RESTART_OFFER` | `"ice_restart_offer"` | `RTCSessionDescriptionInit` (2.0) |
+| `EVENT_NEGOTIATION_NEEDED` | `"negotiation_needed"` | `undefined` (2.0) |
 | `EVENT_RECONNECTING` | `"reconnecting"` | `{ attempt, strategy }` |
 | `EVENT_RECONNECT_FAILED` | `"reconnect_failed"` | `{ attempts }` |
 | `EVENT_DEVICE_CHANGED` | `"device_changed"` | `MediaDeviceInfo[]` |
@@ -948,23 +1068,30 @@ manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
 
 ### Valid Transitions
 
-| From State | Event | To State |
-|------------|-------|----------|
-| IDLE | INIT | INITIALIZING |
-| INITIALIZING | CONNECT | CONNECTING |
-| INITIALIZING | ERROR | ERROR |
-| CONNECTING | CONNECTED | CONNECTED |
-| CONNECTING | DISCONNECT | DISCONNECTED |
-| CONNECTING | ERROR | ERROR |
-| CONNECTED | DISCONNECT | DISCONNECTED |
-| CONNECTED | ERROR | ERROR |
-| RECONNECTING | CONNECT | CONNECTING |
-| RECONNECTING | DISCONNECT | DISCONNECTED |
-| RECONNECTING | RESET | IDLE |
-| DISCONNECTED | CONNECT | CONNECTING |
-| DISCONNECTED | RECONNECTING | RECONNECTING |
-| DISCONNECTED | RESET | IDLE |
-| ERROR | RESET | IDLE |
+| From State | Event | To State | Notes |
+|------------|-------|----------|-------|
+| IDLE | INIT | INITIALIZING | |
+| IDLE | RESET | IDLE | 2.0 — idempotent reset |
+| INITIALIZING | CONNECT | CONNECTING | |
+| INITIALIZING | DISCONNECT | DISCONNECTED | 2.0 — was silent no-op |
+| INITIALIZING | ERROR | ERROR | |
+| INITIALIZING | RESET | IDLE | 2.0 — was silent no-op |
+| CONNECTING | CONNECTED | CONNECTED | |
+| CONNECTING | DISCONNECT | DISCONNECTED | |
+| CONNECTING | ERROR | ERROR | |
+| CONNECTING | RESET | IDLE | 2.0 — was silent no-op |
+| CONNECTED | DISCONNECT | DISCONNECTED | |
+| CONNECTED | ERROR | ERROR | |
+| CONNECTED | RESET | IDLE | 2.0 — was silent no-op |
+| RECONNECTING | CONNECT | CONNECTING | |
+| RECONNECTING | CONNECTED | CONNECTED | 2.0 — fixes ICE-restart stuck-state bug |
+| RECONNECTING | DISCONNECT | DISCONNECTED | |
+| RECONNECTING | ERROR | ERROR | 2.0 |
+| RECONNECTING | RESET | IDLE | |
+| DISCONNECTED | CONNECT | CONNECTING | |
+| DISCONNECTED | RECONNECTING | RECONNECTING | |
+| DISCONNECTED | RESET | IDLE | |
+| ERROR | RESET | IDLE | |
 
 ### Reconnection Strategy
 

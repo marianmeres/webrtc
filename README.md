@@ -49,6 +49,7 @@ const manager = new WebRTCManager<TContext>(factory, config);
 **Configuration Options:**
 - `peerConfig`: RTCConfiguration (ICE servers, etc.)
 - `enableMicrophone`: Enable microphone on initialization (default: false)
+- `audioDirection`: Direction of the audio transceiver added when `enableMicrophone` is false (default: `"recvonly"`). Use `"sendrecv"` if you plan to enable the mic later and want to avoid renegotiation.
 - `dataChannelLabel`: Create a default data channel with this label
 - `autoReconnect`: Enable automatic reconnection (default: false)
 - `maxReconnectAttempts`: Max reconnection attempts (default: 5)
@@ -62,7 +63,8 @@ const manager = new WebRTCManager<TContext>(factory, config);
 ```typescript
 manager.state                 // Current WebRTCState
 manager.localStream           // MediaStream | null
-manager.remoteStream          // MediaStream | null
+manager.remoteStream          // MediaStream | null  (first stream — legacy)
+manager.remoteStreams         // ReadonlyMap<string, MediaStream>  (all remote streams by id)
 manager.dataChannels          // ReadonlyMap<string, RTCDataChannel>
 manager.peerConnection        // RTCPeerConnection | null
 manager.context               // TContext | null - user-defined data
@@ -74,7 +76,8 @@ manager.context               // TContext | null - user-defined data
 await manager.initialize()    // Initialize peer connection
 await manager.connect()       // Transition to CONNECTING state
 manager.disconnect()          // Disconnect and cleanup
-manager.reset()               // Reset to IDLE state
+manager.reset()               // Reset to IDLE state (valid from any state)
+manager.dispose()             // Full teardown: cleanup + unsubscribe every listener
 ```
 
 ### Audio Methods
@@ -101,7 +104,10 @@ await manager.gatherIceCandidates(options)     // Wait for ICE gathering to comp
 
 Wait for ICE gathering to complete. Useful for HTTP POST signaling patterns where you need all ICE candidates bundled in the local description before sending to the server.
 
-**Options:** `timeout` (ms, default 10000), `onCandidate` (callback for each candidate)
+**Options:**
+- `timeout` (ms, default 10000)
+- `onCandidate` — callback fired for each real candidate as it arrives (the terminal `null` sentinel is NOT forwarded; use the promise resolution to detect completion)
+- `resolveOnTimeout` (boolean, default `false`) — when `true`, the promise resolves on timeout instead of rejecting, allowing you to proceed with whatever candidates were gathered so far
 
 ```typescript
 const offer = await manager.createOffer();
@@ -121,6 +127,7 @@ try {
     // 1. Retry with longer timeout
     // 2. Proceed anyway - localDescription may have partial candidates
     // 3. Treat as fatal: manager.reset()
+    // 4. Or pass `resolveOnTimeout: true` upfront to skip the reject path
   }
 }
 ```
@@ -198,12 +205,14 @@ const unsub = manager.subscribe((state) => {
 
 **Available Event Constants:**
 - `EVENT_STATE_CHANGE`
-- `EVENT_LOCAL_STREAM`
-- `EVENT_REMOTE_STREAM`
+- `EVENT_LOCAL_STREAM` — also fires with `null` when the local stream is torn down
+- `EVENT_REMOTE_STREAM` — also fires with `null` when the remote stream is torn down
 - `EVENT_DATA_CHANNEL_OPEN`
 - `EVENT_DATA_CHANNEL_MESSAGE`
 - `EVENT_DATA_CHANNEL_CLOSE`
 - `EVENT_ICE_CANDIDATE`
+- `EVENT_ICE_RESTART_OFFER` — emitted after `iceRestart()` with the new local offer; forward via signaling
+- `EVENT_NEGOTIATION_NEEDED` — forwarded from `pc.onnegotiationneeded` (e.g. after a late track or data channel)
 - `EVENT_RECONNECTING`
 - `EVENT_RECONNECT_FAILED`
 - `EVENT_DEVICE_CHANGED`
@@ -562,6 +571,60 @@ This example demonstrates:
 - Data channel creation and message passing
 - **Audio streaming via WebRTC media tracks** (click "Send Beep" to transmit generated audio)
 - State change monitoring
+
+## Upgrading from 1.x to 2.x
+
+Version 2.0 is a **bug-fix-driven major release**. Most changes are internal corrections that make the library behave the way the docs already said it did. There is exactly **one API-level breaking change**, plus a handful of observable behavior changes you should audit.
+
+### Breaking: `gatherIceCandidates` — `onCandidate` no longer receives the terminal `null`
+
+In 1.x, the `onCandidate` callback was invoked once with `null` to signal end-of-gathering. In 2.x, only real ICE candidates are forwarded. End-of-gathering is signaled exclusively by the returned promise resolving.
+
+```typescript
+// 1.x
+await manager.gatherIceCandidates({
+  onCandidate: (c) => {
+    if (c === null) onGatheringComplete();
+    else collectedCandidates.push(c);
+  },
+});
+
+// 2.x
+await manager.gatherIceCandidates({
+  onCandidate: (c) => collectedCandidates.push(c),
+});
+onGatheringComplete(); // promise resolution = end of gathering
+```
+
+If you weren't using `onCandidate`, nothing changes.
+
+### Behavior changes (no API change, but worth auditing)
+
+1. **Stream events now fire with `null` on teardown.** `local_stream` and `remote_stream` subscribers will now receive `null` when `disconnect()` or `dispose()` runs. If your handler assumed the payload was always a `MediaStream`, add a null check. This matches how `enableMicrophone(false)` already behaved and fixes stale `<audio srcObject>` references in UIs.
+
+2. **`reset()` now works from every state.** In 1.x, calling `reset()` from `INITIALIZING`, `CONNECTING`, or `CONNECTED` silently did nothing (the FSM refused the transition). In 2.x, it always lands in `IDLE`. If you relied on `reset()` being a no-op from those states, wrap the call in a state guard.
+
+3. **ICE-restart reconnects now actually transition to `CONNECTED`.** In 1.x, a successful ICE-restart reconnect left the FSM stuck in `RECONNECTING` because the necessary transition was missing. In 2.x, `RECONNECTING → CONNECTED` is valid and the state machine tracks reality. Code that polled for `state === "RECONNECTING"` as a proxy for "still in flux" may now see `CONNECTED` sooner.
+
+4. **`#reconnectAttempts` resets on every explicit `connect()`/`disconnect()`/`reset()`/`dispose()`.** In 1.x, once the reconnect budget was exhausted, a subsequent user-initiated `connect()` inherited the exhausted counter and would skip all further reconnect attempts on the new session. In 2.x, the counter resets so the next session gets a fresh budget.
+
+5. **`iceRestart()` now emits `ice_restart_offer`.** A real ICE restart requires the new local offer to reach the remote peer via signaling. In 1.x, the library set the local description and returned — the offer never left the process, so ICE restarts silently failed unless the remote side also initiated. In 2.x, subscribe to `ice_restart_offer` and forward the offer through your signaling channel:
+
+   ```typescript
+   manager.on("ice_restart_offer", (offer) => {
+     signalingChannel.send({ type: "offer", offer });
+   });
+   ```
+
+6. **`switchMicrophone()` now promotes `recvonly`/`inactive` transceivers to `sendrecv`.** Previously, calling `switchMicrophone()` on a connection that was originally set up with the mic disabled would replace the track but leave the transceiver direction as `recvonly`, silently producing no audio. 2.x promotes the direction so the new track actually transmits.
+
+### New, additive APIs (no code changes required)
+
+- `audioDirection` config — set to `"sendrecv"` if you plan to enable the mic mid-session and want to avoid renegotiation.
+- `remoteStreams` getter — `ReadonlyMap<string, MediaStream>` of all remote streams, keyed by stream id. The legacy single-stream `remoteStream` getter still works and points at the first stream received.
+- `dispose()` method — one-shot teardown that unsubscribes every listener registered via `on()` or `subscribe()` and cleans up the peer connection. Use in framework teardown hooks instead of tracking each returned unsubscribe handle.
+- `gatherIceCandidates({ resolveOnTimeout: true })` — resolves the promise on timeout instead of rejecting.
+- `negotiation_needed` event — forwarded from `pc.onnegotiationneeded`. Listen for it when you create data channels or add tracks after the initial handshake.
 
 ## License
 

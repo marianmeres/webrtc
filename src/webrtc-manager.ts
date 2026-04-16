@@ -61,6 +61,19 @@ export class WebRTCManager<TContext = unknown> {
 	static readonly EVENT_MICROPHONE_FAILED = "microphone_failed";
 	/** Event emitted when an error occurs. Payload: `Error` */
 	static readonly EVENT_ERROR = "error";
+	/**
+	 * Event emitted after `iceRestart()` creates and sets a new local offer.
+	 * Consumers MUST forward the offer SDP to the remote peer via signaling.
+	 * Payload: `RTCSessionDescriptionInit`
+	 */
+	static readonly EVENT_ICE_RESTART_OFFER = "ice_restart_offer";
+	/**
+	 * Event emitted when the peer connection fires `negotiationneeded`
+	 * (e.g., when a data channel is created after the initial handshake, or when
+	 * tracks are added/removed). Consumers should create a new offer and renegotiate.
+	 * Payload: `undefined`
+	 */
+	static readonly EVENT_NEGOTIATION_NEEDED = "negotiation_needed";
 
 	#fsm: FSM<WebRTCState, WebRTCFsmEvent>;
 	#pubsub: PubSub;
@@ -70,8 +83,10 @@ export class WebRTCManager<TContext = unknown> {
 	#logger: Logger;
 	#localStream: MediaStream | null = null;
 	#remoteStream: MediaStream | null = null;
+	#remoteStreams: Map<string, MediaStream> = new Map();
 	#dataChannels: Map<string, RTCDataChannel> = new Map();
 	#reconnectAttempts: number = 0;
+	#disposed: boolean = false;
 
 	/**
 	 * User-defined context object for storing arbitrary data associated with this manager.
@@ -115,12 +130,17 @@ export class WebRTCManager<TContext = unknown> {
 			logger: this.#logger,
 			states: {
 				[WebRTCState.IDLE]: {
-					on: { [WebRTCFsmEvent.INIT]: WebRTCState.INITIALIZING },
+					on: {
+						[WebRTCFsmEvent.INIT]: WebRTCState.INITIALIZING,
+						[WebRTCFsmEvent.RESET]: WebRTCState.IDLE,
+					},
 				},
 				[WebRTCState.INITIALIZING]: {
 					on: {
 						[WebRTCFsmEvent.CONNECT]: WebRTCState.CONNECTING,
+						[WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
 						[WebRTCFsmEvent.ERROR]: WebRTCState.ERROR,
+						[WebRTCFsmEvent.RESET]: WebRTCState.IDLE,
 					},
 				},
 				[WebRTCState.CONNECTING]: {
@@ -128,18 +148,24 @@ export class WebRTCManager<TContext = unknown> {
 						[WebRTCFsmEvent.CONNECTED]: WebRTCState.CONNECTED,
 						[WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
 						[WebRTCFsmEvent.ERROR]: WebRTCState.ERROR,
+						[WebRTCFsmEvent.RESET]: WebRTCState.IDLE,
 					},
 				},
 				[WebRTCState.CONNECTED]: {
 					on: {
 						[WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
 						[WebRTCFsmEvent.ERROR]: WebRTCState.ERROR,
+						[WebRTCFsmEvent.RESET]: WebRTCState.IDLE,
 					},
 				},
 				[WebRTCState.RECONNECTING]: {
 					on: {
 						[WebRTCFsmEvent.CONNECT]: WebRTCState.CONNECTING,
+						// ICE-restart success transitions directly from RECONNECTING to CONNECTED
+						// without going through CONNECTING (the PC was never torn down).
+						[WebRTCFsmEvent.CONNECTED]: WebRTCState.CONNECTED,
 						[WebRTCFsmEvent.DISCONNECT]: WebRTCState.DISCONNECTED,
+						[WebRTCFsmEvent.ERROR]: WebRTCState.ERROR,
 						[WebRTCFsmEvent.RESET]: WebRTCState.IDLE,
 					},
 				},
@@ -174,9 +200,21 @@ export class WebRTCManager<TContext = unknown> {
 		return this.#localStream;
 	}
 
-	/** Returns the remote media stream, or null if not connected. */
+	/**
+	 * Returns the first remote media stream received, or null if not connected.
+	 * For connections that may produce multiple remote streams, prefer {@link remoteStreams}.
+	 */
 	get remoteStream(): MediaStream | null {
 		return this.#remoteStream;
+	}
+
+	/**
+	 * Returns a readonly map of all remote media streams, keyed by stream id.
+	 * Populated as `ontrack` fires. Useful when the remote peer publishes more
+	 * than one stream (e.g. separate audio + video).
+	 */
+	get remoteStreams(): ReadonlyMap<string, MediaStream> {
+		return this.#remoteStreams;
 	}
 
 	/** Returns the underlying RTCPeerConnection, or null if not initialized. */
@@ -292,26 +330,31 @@ export class WebRTCManager<TContext = unknown> {
 				throw new Error("No audio track in new stream");
 			}
 
-			// Find the sender for the audio track - check both senders and transceivers
-			let sender = this.#pc.getSenders().find((s) => s.track?.kind === "audio");
+			// Locate the audio transceiver so we can both replace the track AND
+			// ensure the direction allows sending. Using the transceiver (rather
+			// than just the sender) lets us flip `recvonly` -> `sendrecv` when
+			// the mic was previously disabled.
+			const transceivers = this.#pc.getTransceivers();
+			const audioTransceiver = transceivers.find(
+				(t) =>
+					t.sender.track?.kind === "audio" ||
+					t.receiver.track?.kind === "audio"
+			);
 
-			if (!sender) {
-				// Try to find via transceiver
-				const transceivers = this.#pc.getTransceivers();
-				const audioTransceiver = transceivers.find(
-					(t) => t.receiver.track.kind === "audio"
+			if (!audioTransceiver) {
+				throw new Error("No audio transceiver found - enable microphone first");
+			}
+
+			await audioTransceiver.sender.replaceTrack(newTrack);
+			if (
+				audioTransceiver.direction === "recvonly" ||
+				audioTransceiver.direction === "inactive"
+			) {
+				audioTransceiver.direction = "sendrecv";
+				this.#logger.debug(
+					"switchMicrophone: promoted transceiver direction to sendrecv."
 				);
-				if (audioTransceiver) {
-					sender = audioTransceiver.sender;
-				}
 			}
-
-			if (!sender) {
-				throw new Error("No audio sender found - enable microphone first");
-			}
-
-			// Replace the track
-			await sender.replaceTrack(newTrack);
 
 			// Stop old tracks
 			this.#localStream.getAudioTracks().forEach((track) => track.stop());
@@ -359,10 +402,12 @@ export class WebRTCManager<TContext = unknown> {
 					});
 				}
 			} else {
-				// Always setup to receive audio, even if we don't enable microphone
-				// This ensures the SDP includes audio media line
-				this.#pc.addTransceiver("audio", { direction: "recvonly" });
-				this.#logger.debug("Added receive-only audio transceiver.");
+				// Always setup an audio transceiver so the SDP includes an audio media line.
+				// Direction is configurable (default recvonly for BC). Use 'sendrecv' when
+				// you expect to enable the mic later without having to renegotiate.
+				const direction = this.#config.audioDirection ?? "recvonly";
+				this.#pc.addTransceiver("audio", { direction });
+				this.#logger.debug(`Added audio transceiver (direction=${direction}).`);
 			}
 
 			if (this.#config.dataChannelLabel) {
@@ -385,6 +430,16 @@ export class WebRTCManager<TContext = unknown> {
 	async connect(): Promise<void> {
 		this.#logger.debug(`Connect called with current state ${this.state}.`);
 
+		// A user-initiated connect starts a fresh reconnect budget. Without this,
+		// a second connection attempt after an earlier exhausted reconnect would
+		// short-circuit in #handleConnectionFailure and never retry.
+		if (
+			this.state !== WebRTCState.RECONNECTING &&
+			this.state !== WebRTCState.CONNECTING
+		) {
+			this.#reconnectAttempts = 0;
+		}
+
 		// Initialize if needed
 		if (this.state === WebRTCState.IDLE) {
 			this.#logger.debug("State is IDLE, initializing first.");
@@ -397,7 +452,7 @@ export class WebRTCManager<TContext = unknown> {
 			// Clean up old connection
 			this.#cleanup();
 			// Reset to IDLE and reinitialize
-			this.#fsm.transition(WebRTCFsmEvent.RESET);
+			this.#dispatch(WebRTCFsmEvent.RESET);
 			await this.initialize();
 			// Stay in INITIALIZING state - caller needs to create offer/answer
 			return;
@@ -501,7 +556,11 @@ export class WebRTCManager<TContext = unknown> {
 	 */
 	disconnect(): void {
 		this.#logger.debug("Disconnect called.");
+		// Explicit disconnect is a user-initiated cancel of any in-flight reconnect.
+		this.#reconnectAttempts = 0;
 		this.#cleanup();
+		// DISCONNECT is only valid from INITIALIZING/CONNECTING/CONNECTED/RECONNECTING.
+		// From other states, the event is a no-op, which is the desired behavior.
 		this.#dispatch(WebRTCFsmEvent.DISCONNECT);
 	}
 
@@ -511,24 +570,29 @@ export class WebRTCManager<TContext = unknown> {
 	 */
 	reset(): void {
 		this.#logger.debug(`Reset called with current state ${this.state}.`);
+		this.#reconnectAttempts = 0;
 		this.#cleanup();
-
-		// Reset from any non-IDLE state
-		if (this.state !== WebRTCState.IDLE) {
-			// Force transition to DISCONNECTED first if needed, then to IDLE
-			if (
-				this.state === WebRTCState.ERROR ||
-				this.state === WebRTCState.DISCONNECTED ||
-				this.state === WebRTCState.RECONNECTING
-			) {
-				this.#dispatch(WebRTCFsmEvent.RESET);
-			} else {
-				// For other states, go through DISCONNECTED first
-				this.#dispatch(WebRTCFsmEvent.DISCONNECT);
-				this.#dispatch(WebRTCFsmEvent.RESET);
-			}
-		}
+		// RESET is now valid from every state, so a single dispatch always lands in IDLE.
+		this.#dispatch(WebRTCFsmEvent.RESET);
 		this.#logger.debug(`Reset complete, state is now ${this.state}.`);
+	}
+
+	/**
+	 * Fully disposes the manager: closes the connection, stops streams, and
+	 * unsubscribes every event listener registered via `on()` or `subscribe()`.
+	 * After calling this, the manager should not be reused.
+	 */
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#logger.debug("Dispose called.");
+		this.#disposed = true;
+		this.#reconnectAttempts = 0;
+		// Drop every subscriber first so teardown side-effects (stream clears,
+		// state transitions) don't fire notifications at a consumer that's
+		// explicitly asked to let go.
+		this.#pubsub.unsubscribeAll();
+		this.#cleanup();
+		this.#dispatch(WebRTCFsmEvent.RESET);
 	}
 
 	/**
@@ -762,6 +826,10 @@ export class WebRTCManager<TContext = unknown> {
 		try {
 			const offer = await this.#pc.createOffer({ iceRestart: true });
 			await this.#pc.setLocalDescription(offer);
+			// A real ICE restart requires the new offer to reach the remote peer
+			// and an answer to come back. Emit the offer so consumers can forward it
+			// via their signaling channel. Without this, ICE restart silently fails.
+			this.#pubsub.publish(WebRTCManager.EVENT_ICE_RESTART_OFFER, offer);
 			this.#logger.debug("ICE restart initiated.");
 			return true;
 		} catch (e) {
@@ -778,7 +846,7 @@ export class WebRTCManager<TContext = unknown> {
 	 * @param options - Optional configuration for timeout and candidate callback.
 	 */
 	gatherIceCandidates(options: GatherIceCandidatesOptions = {}): Promise<void> {
-		const { timeout = 10000, onCandidate } = options;
+		const { timeout = 10000, onCandidate, resolveOnTimeout = false } = options;
 
 		if (!this.#pc) {
 			return Promise.reject(new Error("Peer connection not initialized"));
@@ -796,7 +864,14 @@ export class WebRTCManager<TContext = unknown> {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				cleanup();
-				reject(new Error("ICE gathering timeout"));
+				if (resolveOnTimeout) {
+					this.#logger.debug(
+						"ICE gathering timed out; resolving with partial candidates."
+					);
+					resolve();
+				} else {
+					reject(new Error("ICE gathering timeout"));
+				}
 			}, timeout);
 
 			const cleanup = () => {
@@ -814,8 +889,11 @@ export class WebRTCManager<TContext = unknown> {
 			};
 
 			const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
-				onCandidate?.(event.candidate);
-				if (event.candidate === null) {
+				// Only forward real candidates to the callback; the terminal `null`
+				// is an end-of-gathering sentinel, not a candidate.
+				if (event.candidate) {
+					onCandidate?.(event.candidate);
+				} else {
 					this.#logger.debug("ICE gathering complete via null candidate.");
 					cleanup();
 					resolve();
@@ -902,9 +980,12 @@ export class WebRTCManager<TContext = unknown> {
 			const state = this.#pc!.connectionState;
 			this.#logger.debug(`Connection state changed to ${state}.`);
 			if (state === "connected") {
-				// Only dispatch if in CONNECTING state (FSM can handle CONNECTED event)
-				// This guards against late connection success after user has disconnected
-				if (this.state === WebRTCState.CONNECTING) {
+				// Dispatch CONNECTED from either CONNECTING (fresh connection / full reconnect)
+				// or RECONNECTING (successful ICE-restart keeps the PC alive).
+				if (
+					this.state === WebRTCState.CONNECTING ||
+					this.state === WebRTCState.RECONNECTING
+				) {
 					// Connection successful - reset reconnect attempts and clear any pending timeout
 					this.#reconnectAttempts = 0;
 					if (this.#fullReconnectTimeoutTimer !== null) {
@@ -921,11 +1002,14 @@ export class WebRTCManager<TContext = unknown> {
 				// Connection failed - attempt reconnection if enabled
 				this.#handleConnectionFailure();
 			} else if (state === "disconnected" || state === "closed") {
-				// Only dispatch if not already in a terminal state
+				// Only dispatch if not already in a terminal state.
+				// Also skip INITIALIZING (no DISCONNECT transition is meaningful there —
+				// initialize() owns that state and will handle failure via ERROR).
 				if (
 					this.state !== WebRTCState.DISCONNECTED &&
 					this.state !== WebRTCState.ERROR &&
-					this.state !== WebRTCState.IDLE
+					this.state !== WebRTCState.IDLE &&
+					this.state !== WebRTCState.INITIALIZING
 				) {
 					this.#dispatch(WebRTCFsmEvent.DISCONNECT);
 				}
@@ -935,11 +1019,14 @@ export class WebRTCManager<TContext = unknown> {
 		this.#pc.ontrack = (event) => {
 			this.#logger.debug(`Remote ${event.track.kind} track received.`);
 			if (event.streams && event.streams[0]) {
-				this.#remoteStream = event.streams[0];
-				this.#pubsub.publish(
-					WebRTCManager.EVENT_REMOTE_STREAM,
-					this.#remoteStream
-				);
+				const stream = event.streams[0];
+				// Track the first stream under the legacy `remoteStream` getter for BC,
+				// and accumulate every distinct stream under `remoteStreams` by id.
+				if (!this.#remoteStream) {
+					this.#remoteStream = stream;
+				}
+				this.#remoteStreams.set(stream.id, stream);
+				this.#pubsub.publish(WebRTCManager.EVENT_REMOTE_STREAM, stream);
 			}
 		};
 
@@ -955,6 +1042,11 @@ export class WebRTCManager<TContext = unknown> {
 				`ICE candidate generated: ${event.candidate ? "candidate" : "null (gathering complete)"}.`
 			);
 			this.#pubsub.publish(WebRTCManager.EVENT_ICE_CANDIDATE, event.candidate);
+		};
+
+		this.#pc.onnegotiationneeded = () => {
+			this.#logger.debug("Negotiation needed.");
+			this.#pubsub.publish(WebRTCManager.EVENT_NEGOTIATION_NEEDED, undefined);
 		};
 	}
 
@@ -995,6 +1087,7 @@ export class WebRTCManager<TContext = unknown> {
 		}
 
 		// Stop local stream tracks
+		const hadLocalStream = this.#localStream !== null;
 		if (this.#localStream) {
 			this.#localStream.getTracks().forEach((track) => track.stop());
 			this.#localStream = null;
@@ -1008,7 +1101,20 @@ export class WebRTCManager<TContext = unknown> {
 			this.#logger.debug("Peer connection closed.");
 		}
 
+		const hadRemoteStream =
+			this.#remoteStream !== null || this.#remoteStreams.size > 0;
 		this.#remoteStream = null;
+		this.#remoteStreams.clear();
+
+		// Notify subscribers that streams are gone so UIs can drop stale <audio>/<video>
+		// srcObject references. Symmetric with enableMicrophone(false).
+		if (hadLocalStream) {
+			this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, null);
+		}
+		if (hadRemoteStream) {
+			this.#pubsub.publish(WebRTCManager.EVENT_REMOTE_STREAM, null);
+		}
+
 		this.#logger.debug("Cleanup complete.");
 	}
 

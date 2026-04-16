@@ -237,7 +237,7 @@ Deno.test(
 );
 
 Deno.test(
-	"gatherIceCandidates - calls onCandidate for each candidate",
+	"gatherIceCandidates - calls onCandidate only for real candidates (not the null sentinel)",
 	async () => {
 		const factory = new MockWebRTCFactory();
 		const manager = new WebRTCManager(factory);
@@ -246,8 +246,7 @@ Deno.test(
 
 		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
 
-		// deno-lint-ignore no-explicit-any
-		const candidates: (RTCIceCandidate | null)[] = [];
+		const candidates: RTCIceCandidate[] = [];
 		const mockCandidate1 = { candidate: "candidate1" } as RTCIceCandidate;
 		const mockCandidate2 = { candidate: "candidate2" } as RTCIceCandidate;
 
@@ -257,16 +256,29 @@ Deno.test(
 			},
 		});
 
-		// Simulate ICE gathering with candidates
 		pc.simulateIceGathering([mockCandidate1, mockCandidate2]);
 
 		await gatherPromise;
 
-		// Should have received all candidates plus null
-		assertEquals(candidates.length, 3);
+		// End-of-gathering is signaled by the promise resolving; null is not forwarded.
+		assertEquals(candidates.length, 2);
 		assertEquals(candidates[0], mockCandidate1);
 		assertEquals(candidates[1], mockCandidate2);
-		assertEquals(candidates[2], null);
+	}
+);
+
+Deno.test(
+	"gatherIceCandidates - resolveOnTimeout resolves instead of rejecting",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
+		await manager.initialize();
+
+		// Don't simulate gathering completion; timeout should resolve.
+		await manager.gatherIceCandidates({
+			timeout: 30,
+			resolveOnTimeout: true,
+		});
 	}
 );
 
@@ -317,3 +329,239 @@ Deno.test(
 		);
 	}
 );
+
+// --- Bug fix regression tests ---
+
+Deno.test("reset() works from INITIALIZING state", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	await manager.initialize();
+	assertEquals(manager.state, WebRTCState.INITIALIZING);
+
+	manager.reset();
+	assertEquals(manager.state, WebRTCState.IDLE);
+});
+
+Deno.test("reset() works from CONNECTING state", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	await manager.connect();
+	assertEquals(manager.state, WebRTCState.CONNECTING);
+
+	manager.reset();
+	assertEquals(manager.state, WebRTCState.IDLE);
+});
+
+Deno.test("reset() works from CONNECTED state", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	await manager.connect();
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	pc.simulateConnectionState("connected");
+	assertEquals(manager.state, WebRTCState.CONNECTED);
+
+	manager.reset();
+	assertEquals(manager.state, WebRTCState.IDLE);
+});
+
+Deno.test(
+	"onconnectionstatechange 'connected' transitions RECONNECTING -> CONNECTED",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			reconnectDelay: 1,
+		});
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		assertEquals(manager.state, WebRTCState.CONNECTED);
+
+		// Drive into RECONNECTING via a failure.
+		pc.simulateConnectionState("failed");
+		// Wait one tick + the configured reconnectDelay to let the reconnect fire.
+		await new Promise((r) => setTimeout(r, 20));
+		assertEquals(manager.state, WebRTCState.RECONNECTING);
+
+		// ICE restart succeeds: connectionState flips back to connected while the
+		// FSM is still RECONNECTING. This used to be silently ignored.
+		pc.simulateConnectionState("connected");
+		assertEquals(manager.state, WebRTCState.CONNECTED);
+	}
+);
+
+Deno.test("cleanup publishes null for local_stream and remote_stream", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	await manager.initialize();
+	await manager.enableMicrophone(true);
+
+	// Seed a remote stream via ontrack simulation.
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	const mockStream = { id: "remote-1", getTracks: () => [] } as unknown as MediaStream;
+	pc.simulateTrack({ kind: "audio" } as MediaStreamTrack, mockStream);
+
+	const localEvents: (MediaStream | null)[] = [];
+	const remoteEvents: (MediaStream | null)[] = [];
+	manager.on("local_stream", (s) => localEvents.push(s));
+	manager.on("remote_stream", (s) => remoteEvents.push(s));
+
+	manager.disconnect();
+
+	assertEquals(localEvents.includes(null), true);
+	assertEquals(remoteEvents.includes(null), true);
+});
+
+Deno.test(
+	"#reconnectAttempts resets when user calls connect() after exhausting attempts",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			maxReconnectAttempts: 1,
+			reconnectDelay: 1,
+		});
+
+		let reconnectFailedCount = 0;
+		manager.on("reconnect_failed", () => {
+			reconnectFailedCount++;
+		});
+
+		await manager.connect();
+		let pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		pc.simulateConnectionState("failed");
+		// Wait for reconnect + failure.
+		await new Promise((r) => setTimeout(r, 20));
+		pc.simulateConnectionState("failed");
+		await new Promise((r) => setTimeout(r, 20));
+		assertEquals(reconnectFailedCount, 1);
+
+		// User explicitly reconnects - counter should reset so the next failure
+		// triggers another reconnection attempt, not an immediate reconnect_failed.
+		manager.reset();
+		await manager.connect();
+		pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		pc.simulateConnectionState("failed");
+		await new Promise((r) => setTimeout(r, 20));
+		// Not exhausted yet — one more attempt was allowed.
+		assertEquals(reconnectFailedCount, 1);
+	}
+);
+
+Deno.test("dispose() unsubscribes all listeners", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	let stateEvents = 0;
+	manager.on("state_change", () => {
+		stateEvents++;
+	});
+
+	await manager.initialize();
+	const beforeDispose = stateEvents;
+
+	manager.dispose();
+
+	// Post-dispose: trigger another pubsub publish directly via another init —
+	// but manager is IDLE after dispose, so this would re-run the flow. Instead,
+	// assert the subscriber no longer fires by making a fresh state change.
+	await manager.initialize();
+	assertEquals(stateEvents, beforeDispose);
+});
+
+Deno.test("switchMicrophone promotes recvonly transceiver to sendrecv", async () => {
+	const factory = new MockWebRTCFactory();
+	// Default: audioDirection is recvonly.
+	const manager = new WebRTCManager(factory);
+	await manager.initialize();
+	await manager.enableMicrophone(true);
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+
+	// Simulate a recvonly transceiver (as if enableMicrophone was off initially
+	// and the transceiver was added recvonly). Force direction recvonly.
+	const tx = pc.getTransceivers()[0];
+	if (tx) {
+		(tx as unknown as { direction: string }).direction = "recvonly";
+	}
+
+	const ok = await manager.switchMicrophone("mic1");
+	assertEquals(ok, true);
+	if (tx) {
+		assertEquals(
+			(tx as unknown as { direction: string }).direction,
+			"sendrecv"
+		);
+	}
+});
+
+Deno.test("audioDirection config respected on initialize", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory, {
+		audioDirection: "sendrecv",
+	});
+	await manager.initialize();
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	const tx = pc.getTransceivers()[0];
+	assertEquals(
+		(tx as unknown as { direction: string }).direction,
+		"sendrecv"
+	);
+});
+
+Deno.test("iceRestart emits ice_restart_offer event", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+	await manager.initialize();
+
+	// deno-lint-ignore no-explicit-any
+	let forwardedOffer: any = null;
+	manager.on("ice_restart_offer", (offer) => {
+		forwardedOffer = offer;
+	});
+
+	const ok = await manager.iceRestart();
+	assertEquals(ok, true);
+	assertExists(forwardedOffer);
+	assertEquals(forwardedOffer.type, "offer");
+});
+
+Deno.test("negotiation_needed event is forwarded", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+	await manager.initialize();
+
+	let fired = 0;
+	manager.on("negotiation_needed", () => {
+		fired++;
+	});
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	pc.simulateNegotiationNeeded();
+	assertEquals(fired, 1);
+});
+
+Deno.test("remoteStreams accumulates multiple remote streams", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+	await manager.initialize();
+
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	const s1 = { id: "stream-1", getTracks: () => [] } as unknown as MediaStream;
+	const s2 = { id: "stream-2", getTracks: () => [] } as unknown as MediaStream;
+
+	pc.simulateTrack({ kind: "audio" } as MediaStreamTrack, s1);
+	pc.simulateTrack({ kind: "video" } as MediaStreamTrack, s2);
+
+	assertEquals(manager.remoteStreams.size, 2);
+	// Legacy single-stream getter still points at the first.
+	assertEquals(manager.remoteStream?.id, "stream-1");
+});

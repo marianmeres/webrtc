@@ -83,6 +83,20 @@ export class MockRTCPeerConnection extends EventTarget {
 	iceConnectionState: RTCIceConnectionState = "new";
 	iceGatheringState: RTCIceGatheringState = "new";
 
+	// Property-style handlers that WebRTCManager assigns to. Tests can trigger
+	// them via the simulate* helpers below without needing real browser events.
+	// deno-lint-ignore no-explicit-any
+	onconnectionstatechange: ((this: any, ev: Event) => any) | null = null;
+	// deno-lint-ignore no-explicit-any
+	ontrack: ((this: any, ev: RTCTrackEvent) => any) | null = null;
+	// deno-lint-ignore no-explicit-any
+	ondatachannel: ((this: any, ev: RTCDataChannelEvent) => any) | null = null;
+	// deno-lint-ignore no-explicit-any
+	onicecandidate: ((this: any, ev: RTCPeerConnectionIceEvent) => any) | null =
+		null;
+	// deno-lint-ignore no-explicit-any
+	onnegotiationneeded: ((this: any, ev: Event) => any) | null = null;
+
 	#senders: RTCRtpSender[] = [];
 	#transceivers: RTCRtpTransceiver[] = [];
 	#dataChannels: MockRTCDataChannel[] = [];
@@ -220,6 +234,34 @@ export class MockRTCPeerConnection extends EventTarget {
 
 		this.iceGatheringState = "complete";
 		this.#iceGatheringStateListeners.forEach((l) => l());
+	}
+
+	/**
+	 * Drive the `connectionState` property and invoke the `onconnectionstatechange`
+	 * handler, mimicking how a real RTCPeerConnection notifies state changes.
+	 */
+	simulateConnectionState(state: RTCPeerConnectionState) {
+		this.connectionState = state;
+		this.onconnectionstatechange?.(new Event("connectionstatechange"));
+	}
+
+	/**
+	 * Simulate a remote track arriving with its associated stream.
+	 */
+	simulateTrack(track: MediaStreamTrack, stream: MediaStream) {
+		this.ontrack?.({
+			track,
+			streams: [stream],
+			receiver: {} as RTCRtpReceiver,
+			transceiver: {} as RTCRtpTransceiver,
+		} as unknown as RTCTrackEvent);
+	}
+
+	/**
+	 * Simulate `negotiationneeded` firing (e.g., after a late addTrack).
+	 */
+	simulateNegotiationNeeded() {
+		this.onnegotiationneeded?.(new Event("negotiationneeded"));
 	}
 }
 
