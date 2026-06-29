@@ -2,7 +2,7 @@ node_modules
 .npm-dist
 .idea
 .DS_Store
-
+tmp/*
 
 # Browser test build artifacts
 tests/browser/*.js
