@@ -452,6 +452,8 @@ Deno.test(
 		await new Promise((r) => setTimeout(r, 20));
 		// Not exhausted yet — one more attempt was allowed.
 		assertEquals(reconnectFailedCount, 1);
+		// Clears the pending ice-restart attempt timeout.
+		manager.dispose();
 	}
 );
 
@@ -564,4 +566,280 @@ Deno.test("remoteStreams accumulates multiple remote streams", async () => {
 	assertEquals(manager.remoteStreams.size, 2);
 	// Legacy single-stream getter still points at the first.
 	assertEquals(manager.remoteStream?.id, "stream-1");
+});
+
+// --- Invalid FSM transitions must be no-ops, never throws ---
+
+Deno.test("disconnect() is safe from IDLE, DISCONNECTED and ERROR", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+
+	// IDLE: nothing to disconnect, must not throw.
+	manager.disconnect();
+	assertEquals(manager.state, WebRTCState.IDLE);
+
+	await manager.connect();
+	manager.disconnect();
+	assertEquals(manager.state, WebRTCState.DISCONNECTED);
+	// Second disconnect from DISCONNECTED (e.g. "hang up" after the link already dropped).
+	manager.disconnect();
+	assertEquals(manager.state, WebRTCState.DISCONNECTED);
+
+	// ERROR is sticky; disconnect() must neither throw nor leave ERROR.
+	manager.reset();
+	await manager.connect();
+	const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+	pc.setRemoteDescription = () => Promise.reject(new Error("bad sdp"));
+	await manager.setRemoteDescription({ type: "answer", sdp: "x" });
+	assertEquals(manager.state, WebRTCState.ERROR);
+	manager.disconnect();
+	assertEquals(manager.state, WebRTCState.ERROR);
+});
+
+Deno.test(
+	"signaling failure while already in ERROR returns false instead of throwing",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
+		const errors: unknown[] = [];
+		manager.on("error", (e) => errors.push(e));
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.setRemoteDescription = () => Promise.reject(new Error("bad sdp"));
+		pc.addIceCandidate = () => Promise.reject(new Error("no remote description"));
+
+		assertEquals(await manager.setRemoteDescription({ type: "answer", sdp: "x" }), false);
+		assertEquals(manager.state, WebRTCState.ERROR);
+
+		// Queued candidates keep arriving via signaling after the failure.
+		assertEquals(await manager.addIceCandidate({ candidate: "c" }), false);
+		assertEquals(manager.state, WebRTCState.ERROR);
+		// Both real errors are surfaced; the FSM never masks them with its own.
+		assertEquals(errors.length, 2);
+		assertEquals((errors[1] as Error).message, "no remote description");
+	}
+);
+
+Deno.test(
+	"'failed' while in ERROR does not throw and does not start reconnection",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			reconnectDelay: 1,
+		});
+		let reconnecting = 0;
+		manager.on("reconnecting", () => reconnecting++);
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.setRemoteDescription = () => Promise.reject(new Error("bad sdp"));
+		await manager.setRemoteDescription({ type: "answer", sdp: "x" });
+		assertEquals(manager.state, WebRTCState.ERROR);
+
+		pc.simulateConnectionState("failed");
+		await new Promise((r) => setTimeout(r, 20));
+		assertEquals(manager.state, WebRTCState.ERROR);
+		assertEquals(reconnecting, 0);
+	}
+);
+
+// --- Reconnection budget and strategy sequencing ---
+
+Deno.test(
+	"maxReconnectAttempts is honored across the full strategy and reconnect_failed fires once",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			maxReconnectAttempts: 4,
+			reconnectDelay: 1,
+			iceRestartTimeout: 5,
+			fullReconnectTimeout: 5,
+		});
+		const attempts: number[] = [];
+		const strategies: string[] = [];
+		const failed: number[] = [];
+		manager.on("reconnecting", ({ attempt, strategy }) => {
+			attempts.push(attempt);
+			strategies.push(strategy);
+		});
+		manager.on("reconnect_failed", ({ attempts }) => failed.push(attempts));
+
+		await manager.connect();
+		(manager.peerConnection as unknown as MockRTCPeerConnection).simulateConnectionState(
+			"connected"
+		);
+		// Every attempt fails: the PC flips to "failed" again after each one. A
+		// real PC only fires connectionstatechange on a change, so once the budget
+		// is exhausted (state parks in DISCONNECTED) nothing further is reported.
+		for (let i = 0; i < 12; i++) {
+			const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+			if (manager.state !== WebRTCState.DISCONNECTED) {
+				pc?.simulateConnectionState("failed");
+			}
+			await new Promise((r) => setTimeout(r, 25));
+		}
+
+		assertEquals(attempts, [1, 2, 3, 4]);
+		assertEquals(strategies, ["ice-restart", "ice-restart", "full", "full"]);
+		assertEquals(failed, [4]);
+		assertEquals(manager.state, WebRTCState.DISCONNECTED);
+	}
+);
+
+Deno.test(
+	"ice-restart attempt times out and advances to the next attempt",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			reconnectDelay: 1,
+			iceRestartTimeout: 10,
+		});
+		const attempts: number[] = [];
+		manager.on("reconnecting", ({ attempt }) => attempts.push(attempt));
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		pc.simulateConnectionState("failed");
+		// Attempt 1 fires after 1ms; the restart offer is never answered and the
+		// PC (already "failed") emits nothing further. Without the timeout the
+		// manager would sit in RECONNECTING forever and attempt 2 would never come.
+		await new Promise((r) => setTimeout(r, 40));
+		assertEquals(attempts.slice(0, 2), [1, 2]);
+		manager.dispose();
+	}
+);
+
+Deno.test(
+	"'reconnecting' with strategy 'full' fires only once the new peer connection exists",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			reconnectDelay: 1,
+			iceRestartTimeout: 5,
+			fullReconnectTimeout: 1000,
+		});
+		await manager.connect();
+		const oldPc = manager.peerConnection;
+		(oldPc as unknown as MockRTCPeerConnection).simulateConnectionState("connected");
+
+		let atEvent: { samePc: boolean; state: WebRTCState } | null = null;
+		manager.on("reconnecting", ({ strategy }) => {
+			if (strategy === "full") {
+				atEvent = { samePc: manager.peerConnection === oldPc, state: manager.state };
+			}
+		});
+
+		// Attempts 1-2 (ice-restart) time out, attempt 3 is the full reconnect.
+		(oldPc as unknown as MockRTCPeerConnection).simulateConnectionState("failed");
+		await new Promise((r) => setTimeout(r, 60));
+
+		// Read via a typed alias: TS narrows `atEvent` to null here because the
+		// assignment happens inside a callback.
+		const seen = atEvent as { samePc: boolean; state: WebRTCState } | null;
+		assertExists(seen);
+		// A handler can call createOffer() right away and hit the NEW connection.
+		assertEquals(seen.samePc, false);
+		assertEquals(seen.state, WebRTCState.CONNECTING);
+		manager.dispose();
+	}
+);
+
+Deno.test(
+	"explicit action during the reconnect backoff cancels the scheduled attempt",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, {
+			autoReconnect: true,
+			reconnectDelay: 20,
+		});
+		let reconnecting = 0;
+		manager.on("reconnecting", () => reconnecting++);
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		pc.simulateConnectionState("failed");
+		assertEquals(manager.state, WebRTCState.RECONNECTING);
+
+		// User takes over before the backoff elapses.
+		manager.reset();
+		await manager.connect();
+		await new Promise((r) => setTimeout(r, 40));
+		assertEquals(reconnecting, 0);
+		assertEquals(manager.state, WebRTCState.CONNECTING);
+	}
+);
+
+// --- Transient "disconnected" ---
+
+Deno.test(
+	"transient 'disconnected' leaves the FSM alone so a self-recovering PC stays CONNECTED",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory);
+		const states: WebRTCState[] = [];
+		manager.on("state_change", (s) => states.push(s));
+
+		await manager.connect();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		pc.simulateConnectionState("connected");
+		assertEquals(manager.state, WebRTCState.CONNECTED);
+
+		pc.simulateConnectionState("disconnected");
+		assertEquals(manager.state, WebRTCState.CONNECTED);
+		pc.simulateConnectionState("connected");
+		assertEquals(manager.state, WebRTCState.CONNECTED);
+		// The PC was never torn down.
+		assertEquals(manager.peerConnection, pc as unknown as RTCPeerConnection);
+
+		// A genuine loss still lands in DISCONNECTED via "failed".
+		pc.simulateConnectionState("failed");
+		assertEquals(manager.state, WebRTCState.DISCONNECTED);
+		assertEquals(states.filter((s) => s === WebRTCState.DISCONNECTED).length, 1);
+	}
+);
+
+// --- Pre-acquired microphone ---
+
+Deno.test(
+	"enableMicrophone(true) before initialize() attaches the stream to the new PC",
+	async () => {
+		const factory = new MockWebRTCFactory();
+		const manager = new WebRTCManager(factory, { enableMicrophone: true });
+
+		await manager.enableMicrophone(true);
+		const stream = manager.localStream;
+		assertExists(stream);
+
+		await manager.initialize();
+		const pc = manager.peerConnection as unknown as MockRTCPeerConnection;
+		// Same stream (not re-acquired), and its track is actually being sent.
+		assertEquals(manager.localStream, stream);
+		assertEquals(pc.getSenders().length, 1);
+		assertEquals(pc.getSenders()[0].track, stream!.getAudioTracks()[0]);
+	}
+);
+
+// --- Typed on() ---
+
+Deno.test("on() types the handler payload per event", async () => {
+	const factory = new MockWebRTCFactory();
+	const manager = new WebRTCManager(factory);
+	// Compile-time: `attempt` is a number, `s` is WebRTCState. Runtime: still delivers.
+	let seen: WebRTCState | null = null;
+	manager.on("reconnecting", ({ attempt, strategy }) => {
+		const _n: number = attempt;
+		const _s: "ice-restart" | "full" = strategy;
+	});
+	manager.on("state_change", (s) => {
+		seen = s;
+	});
+	await manager.initialize();
+	assertEquals(seen, WebRTCState.INITIALIZING);
 });

@@ -185,6 +185,10 @@ export class MockRTCPeerConnection extends EventTarget {
 		return Promise.resolve();
 	}
 
+	addIceCandidate(_candidate?: RTCIceCandidateInit | null): Promise<void> {
+		return Promise.resolve();
+	}
+
 	close() {
 		this.connectionState = "closed";
 		this.signalingState = "closed";

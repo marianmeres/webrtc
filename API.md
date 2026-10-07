@@ -214,7 +214,7 @@ Transitions to the `CONNECTING` state. Automatically calls `initialize()` if in 
 - From `INITIALIZING`: Transitions to `CONNECTING`
 - From `CONNECTED` or `CONNECTING`: No-op
 
-**Side effects (2.0):** Resets the internal reconnect attempts counter when starting a fresh session, so a previously-exhausted reconnect budget does not block new attempts.
+**Side effects (2.0):** Resets the internal reconnect attempts counter when starting a fresh session, so a previously-exhausted reconnect budget does not block new attempts. (2.2) The auto-reconnect path bypasses this reset so `maxReconnectAttempts` is honored across full reconnects. Calling `connect()` while an attempt is scheduled (state `RECONNECTING`) cancels that attempt.
 
 **Example:**
 
@@ -239,7 +239,7 @@ Disconnects the peer connection and cleans up all resources:
 - (2.0) Publishes `local_stream` / `remote_stream` with `null` payload so UIs drop stale stream references
 - (2.0) Resets the reconnect attempts counter
 
-**Transitions:** Any state → `DISCONNECTED`
+**Transitions:** `INITIALIZING` / `CONNECTING` / `CONNECTED` / `RECONNECTING` → `DISCONNECTED`. From `IDLE`, `DISCONNECTED` or `ERROR` the state is unchanged (resources are still cleaned up). (2.2) Previously those calls threw `Invalid transition …`.
 
 **Example:**
 
@@ -877,7 +877,14 @@ interface WebRTCManagerConfig {
   /** Initial reconnection delay in ms (doubles each attempt). Default: 1000 */
   reconnectDelay?: number;
 
-  /** Timeout in ms for full reconnection to reach connected state. Default: 30000 */
+  /**
+   * Timeout in ms for an "ice-restart" attempt to reach connected state.
+   * When it elapses the attempt counts as failed and the next one is scheduled.
+   * Default: 10000. Added in 2.2.
+   */
+  iceRestartTimeout?: number;
+
+  /** Timeout in ms for a "full" reconnection attempt to reach connected state. Default: 30000 */
   fullReconnectTimeout?: number;
 
   /** Callback to control whether reconnection should proceed */
@@ -1010,7 +1017,7 @@ Static event name constants on `WebRTCManager`.
 | `EVENT_ICE_CANDIDATE` | `"ice_candidate"` | `RTCIceCandidate \| null` |
 | `EVENT_ICE_RESTART_OFFER` | `"ice_restart_offer"` | `RTCSessionDescriptionInit` (2.0) |
 | `EVENT_NEGOTIATION_NEEDED` | `"negotiation_needed"` | `undefined` (2.0) |
-| `EVENT_RECONNECTING` | `"reconnecting"` | `{ attempt, strategy }` |
+| `EVENT_RECONNECTING` | `"reconnecting"` | `{ attempt, strategy }` (2.2: fires when the attempt executes; for `"full"`, after the new peer connection exists) |
 | `EVENT_RECONNECT_FAILED` | `"reconnect_failed"` | `{ attempts }` |
 | `EVENT_DEVICE_CHANGED` | `"device_changed"` | `MediaDeviceInfo[]` |
 | `EVENT_MICROPHONE_FAILED` | `"microphone_failed"` | `{ error?, reason? }` |
@@ -1093,31 +1100,48 @@ manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
 | DISCONNECTED | RESET | IDLE | |
 | ERROR | RESET | IDLE | |
 
+Events with no edge from the current state are ignored (debug log), never thrown. (2.2) Previously the FSM threw `Invalid transition …`, e.g. on a second `disconnect()` or on an error reported while already in `ERROR`.
+
+### Peer Connection State Mapping
+
+How `RTCPeerConnection.connectionState` drives the FSM:
+
+| `connectionState` | FSM effect |
+|-------------------|------------|
+| `"connected"` | `CONNECTED` (from `CONNECTING` or `RECONNECTING`); resets the reconnect budget |
+| `"failed"` | `DISCONNECTED`, then `RECONNECTING` when `autoReconnect` is on |
+| `"closed"` | `DISCONNECTED` |
+| `"disconnected"` | **none** — logged as a warning only (2.2) |
+
+`"disconnected"` is transient by spec: browsers report it on ICE hiccups (Wi-Fi switch, sleep/wake) and usually recover to `"connected"` without renegotiation. Transitioning on it left the FSM in `DISCONNECTED` next to a live connection, and a `connect()` from there tore the healthy connection down. A genuine loss surfaces as `"failed"` once ICE consent expires.
+
 ### Reconnection Strategy
 
 When `autoReconnect: true`:
 
-1. **Attempts 1-2:** ICE restart (quick, preserves connection)
+1. **Attempts 1-2:** ICE restart (quick, preserves connection). The new local offer is emitted via `ice_restart_offer`; forward it through signaling.
 2. **Attempts 3+:** Full reconnection (new peer connection)
 3. **Backoff:** `reconnectDelay * 2^(attempt-1)` milliseconds
+4. **Bound per attempt:** `iceRestartTimeout` (default 10 s) for ICE restarts, `fullReconnectTimeout` (default 30 s) for full reconnects. An attempt that doesn't reach `CONNECTED` in time counts as failed and the next one is scheduled. (2.2) Previously ICE-restart attempts were unbounded.
+5. **Exhaustion:** after `maxReconnectAttempts` failed attempts, `reconnect_failed` is emitted and the manager stays in `DISCONNECTED`. (2.2) Previously the counter reset on every full reconnect, so this never happened.
+
+`reconnecting` fires when an attempt executes (after its backoff), not when it is scheduled. A failed attempt never moves the FSM to `ERROR`; only `initialize()` failing during a full reconnect does, and auto-reconnect does not run from `ERROR` (call `reset()`). An explicit `connect()` / `disconnect()` / `reset()` during the backoff cancels the scheduled attempt.
 
 #### Full Reconnection and Signaling
 
-**Important:** For "full" strategy reconnections, the manager creates a new peer connection but **cannot automatically complete the signaling handshake**. You must listen for the `reconnecting` event and re-perform signaling when `strategy === 'full'`:
+**Important:** For "full" strategy reconnections, the manager creates a new peer connection but **cannot automatically complete the signaling handshake**. You must listen for the `reconnecting` event and re-perform signaling when `strategy === 'full'`. (2.2) The event fires only once the new peer connection exists, so `createOffer()` in the handler targets the right connection:
 
 ```typescript
 manager.on('reconnecting', async ({ attempt, strategy }) => {
   if (strategy === 'full') {
-    // Re-do offer/answer exchange
+    // Re-do offer/answer exchange on the new peer connection
     const offer = await manager.createOffer();
     await manager.setLocalDescription(offer);
     sendToRemote(offer);
   }
-  // For 'ice-restart', the manager handles it automatically
+  // For 'ice-restart', forward the offer from 'ice_restart_offer' instead
 });
 ```
-
-If the connection doesn't reach `CONNECTED` state within `fullReconnectTimeout` (default: 30 seconds), it's treated as a failed attempt and the next reconnection attempt begins. When all attempts are exhausted, `EVENT_RECONNECT_FAILED` is emitted.
 
 ### Conditional Reconnection
 

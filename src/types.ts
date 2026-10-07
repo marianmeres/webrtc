@@ -38,7 +38,13 @@ export interface WebRTCManagerConfig {
 	maxReconnectAttempts?: number;
 	/** Initial reconnection delay in ms. Doubles with each attempt. Defaults to 1000. */
 	reconnectDelay?: number;
-	/** Timeout in ms for full reconnection strategy to reach connected state. Defaults to 30000. */
+	/**
+	 * Timeout in ms for an "ice-restart" attempt to reach connected state.
+	 * When it elapses the attempt counts as failed and the next one is scheduled.
+	 * Defaults to 10000.
+	 */
+	iceRestartTimeout?: number;
+	/** Timeout in ms for a "full" reconnection attempt to reach connected state. Defaults to 30000. */
 	fullReconnectTimeout?: number;
 	/**
 	 * Callback to determine whether reconnection should be attempted.
@@ -144,10 +150,10 @@ export interface WebRTCEvents {
 	/** Emitted when an ICE candidate is generated. Payload: RTCIceCandidate or null. */
 	ice_candidate: RTCIceCandidate | null;
 	/**
-	 * Emitted when reconnection is being attempted.
-	 * For 'full' strategy reconnections, consumers should listen for this event
-	 * and re-establish signaling (create new offer/answer exchange).
-	 * The manager will call connect() but cannot handle the signaling automatically.
+	 * Emitted when a reconnection attempt starts executing (after its backoff
+	 * delay). For 'full' strategy it fires once the NEW peer connection exists,
+	 * so consumers can re-establish signaling (create a new offer/answer exchange)
+	 * right away in the handler. The manager cannot handle signaling itself.
 	 */
 	reconnecting: { attempt: number; strategy: "ice-restart" | "full" };
 	/** Emitted when all reconnection attempts have failed. Payload: total attempts. */

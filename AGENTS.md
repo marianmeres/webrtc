@@ -4,7 +4,7 @@
 
 ```yaml
 name: "@marianmeres/webrtc"
-version: "2.0.0"
+version: "2.1.3"
 license: MIT
 author: Marian Meres
 repository: https://github.com/marianmeres/webrtc
@@ -27,13 +27,13 @@ A lightweight, framework-agnostic WebRTC manager providing:
 
 ```yaml
 production:
-  - "@marianmeres/clog": "^3.15.2"
-  - "@marianmeres/fsm": "^2.16.4"
-  - "@marianmeres/pubsub": "^2.4.6"
+  - "@marianmeres/clog": "^3.23.0"
+  - "@marianmeres/fsm": "^3.1.0"
+  - "@marianmeres/pubsub": "^3.0.0"
 development:
-  - "@std/assert": "^1.0.18"
-  - "@std/fs": "^1.0.22"
-  - "@std/path": "^1.1.4"
+  - "@std/assert": "^1.0.19"
+  - "@std/fs": "^1.0.24"
+  - "@std/path": "^1.1.6"
 ```
 
 ## File Structure
@@ -45,23 +45,19 @@ src/
   webrtc-manager.ts   # Main WebRTCManager class
 
 tests/
-  mocks.ts                    # Mock WebRTCFactory for testing
+  mocks.ts                    # Mock WebRTCFactory / RTCPeerConnection for testing
   webrtc-manager.test.ts      # Deno unit tests
-  browser/
-    p2p-tests.ts              # Browser integration tests
+  mermaid.ts                  # Prints the FSM as a Mermaid diagram (source of states.png)
 
 example/
-  peer.ts             # Two-peer example with localStorage signaling
-  p2p.ts              # Single-page P2P example
-  audio-peer.ts       # Audio testing implementation
-  main.ts             # Signaling server example
+  index.html          # Parent page: two iframes, postMessage signaling relay
+  peer1.html          # Offerer peer
+  peer2.html          # Answerer peer
+  peer.js             # Shared utilities (factory, beep generation, logging)
+  dist/webrtc.js      # Built bundle (deno task example:build)
 
 scripts/
   build-npm.ts        # npm distribution build
-  build-example.ts    # Example bundling
-  build-browser-tests.ts
-  serve-browser-tests.ts
-  signaling-server.ts
 ```
 
 ## State Machine
@@ -117,6 +113,17 @@ DISCONNECTED  --RESET-->       IDLE
 ERROR         --RESET-->       IDLE
 ```
 
+An event with no edge from the current state is ignored (debug log), never thrown (2.2; the FSM's assert mode previously threw `Invalid transition …`).
+
+### Peer Connection State Mapping
+
+| `pc.connectionState` | FSM effect |
+|----------------------|------------|
+| `"connected"` | CONNECTED (from CONNECTING / RECONNECTING); resets reconnect budget |
+| `"failed"` | DISCONNECTED, then RECONNECTING when `autoReconnect` |
+| `"closed"` | DISCONNECTED |
+| `"disconnected"` | none — warning log only (2.2). Transient by spec; usually recovers to `"connected"` on its own. A genuine loss surfaces as `"failed"`. |
+
 ## Public API Reference
 
 ### Constructor
@@ -166,7 +173,8 @@ interface WebRTCManagerConfig {
   autoReconnect?: boolean;            // Default: false
   maxReconnectAttempts?: number;      // Default: 5
   reconnectDelay?: number;            // Default: 1000ms
-  fullReconnectTimeout?: number;      // Timeout for full reconnect strategy (default: 30000ms)
+  iceRestartTimeout?: number;         // (2.2) Timeout for an ice-restart attempt (default: 10000ms)
+  fullReconnectTimeout?: number;      // Timeout for a full reconnect attempt (default: 30000ms)
   shouldReconnect?: (context: {       // Callback to control reconnection
     attempt: number;
     maxAttempts: number;
@@ -204,8 +212,8 @@ interface GatherIceCandidatesOptions {
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | initialize | `(): Promise<void>` | Create peer connection, setup tracks |
-| connect | `(): Promise<void>` | Transition to CONNECTING (auto-initializes if IDLE). (2.0) Resets `#reconnectAttempts` so a prior exhausted reconnect budget does not block new attempts. |
-| disconnect | `(): void` | Close connection, cleanup resources. (2.0) Also resets `#reconnectAttempts` and publishes `local_stream:null` / `remote_stream:null`. |
+| connect | `(): Promise<void>` | Transition to CONNECTING (auto-initializes if IDLE). (2.0) Resets `#reconnectAttempts` so a prior exhausted reconnect budget does not block new attempts. (2.2) The internal auto-reconnect path uses `#connect()` which skips that reset. |
+| disconnect | `(): void` | Close connection, cleanup resources. (2.0) Also resets `#reconnectAttempts` and publishes `local_stream:null` / `remote_stream:null`. (2.2) From IDLE / DISCONNECTED / ERROR the state is unchanged (previously threw). |
 | reset | `(): void` | Reset to IDLE from any state. (2.0) Now valid from every state (previously silently no-op'd from INITIALIZING/CONNECTING/CONNECTED). |
 | dispose | `(): void` | (2.0) Fully dispose: unsubscribes every listener registered via `on()`/`subscribe()`, cleans up the PC, transitions to IDLE. Idempotent. Manager should not be reused after dispose. |
 
@@ -264,7 +272,7 @@ interface GatherIceCandidatesOptions {
 | EVENT_DATA_CHANNEL_MESSAGE | "data_channel_message" | { channel: RTCDataChannel; data: any } | |
 | EVENT_DATA_CHANNEL_CLOSE | "data_channel_close" | RTCDataChannel | |
 | EVENT_ICE_CANDIDATE | "ice_candidate" | RTCIceCandidate \| null | |
-| EVENT_RECONNECTING | "reconnecting" | { attempt: number; strategy: "ice-restart" \| "full" } | |
+| EVENT_RECONNECTING | "reconnecting" | { attempt: number; strategy: "ice-restart" \| "full" } | (2.2) Fires when the attempt executes (after backoff); for "full", only after the new PC exists. |
 | EVENT_RECONNECT_FAILED | "reconnect_failed" | { attempts: number } | |
 | EVENT_DEVICE_CHANGED | "device_changed" | MediaDeviceInfo[] | |
 | EVENT_MICROPHONE_FAILED | "microphone_failed" | { error?: any; reason?: string } | |
@@ -320,9 +328,13 @@ When `autoReconnect: true`:
 
 Backoff formula: `reconnectDelay * 2^(attempt-1)` milliseconds
 
+Each attempt is bounded: `iceRestartTimeout` (default 10000ms) for ice-restart, `fullReconnectTimeout` (default 30000ms) for full. Not reaching CONNECTED in time counts as a failed attempt. After `maxReconnectAttempts` failed attempts `reconnect_failed` is emitted and the FSM stays DISCONNECTED. A failed attempt never moves the FSM to ERROR; auto-reconnect does not run from ERROR (requires `reset()`). An explicit `connect()` / `disconnect()` / `reset()` during the backoff cancels the scheduled attempt.
+
+For "ice-restart" strategy, consumers MUST forward the `ice_restart_offer` payload via signaling.
+
 For "full" strategy reconnections, consumers MUST:
-1. Listen for `reconnecting` event with `strategy: "full"`
-2. Re-perform signaling handshake (create new offer/answer)
+1. Listen for `reconnecting` event with `strategy: "full"` (fires once the new PC exists)
+2. Re-perform signaling handshake on it (create new offer/answer)
 
 ## Error Handling
 
@@ -338,11 +350,13 @@ For "full" strategy reconnections, consumers MUST:
 
 ```bash
 deno task test          # Run unit tests
-deno task test:browser  # Run browser integration tests
-deno task npm:build     # Build npm distribution
+deno task test:watch    # Run unit tests in watch mode
+deno task npm:build     # Build npm distribution (.npm-dist/)
 deno task npm:publish   # Build and publish to npm
-deno task build:example # Build examples
-deno task serve:example # Run signaling server
+deno task example:build # Bundle example/dist/webrtc.js
+deno task release       # Bump version (@marianmeres/release)
+deno task publish       # deno publish + npm publish
+deno task rp / rpm      # release (patch / minor) + publish
 ```
 
 ## Implementation Notes
@@ -357,6 +371,11 @@ deno task serve:example # Run signaling server
 8. (2.0) `#reconnectAttempts` is reset whenever the user explicitly calls `connect()` / `disconnect()` / `reset()` / `dispose()`, so a prior exhausted reconnect budget never blocks a fresh session.
 9. (2.0) ICE-restart success transitions `RECONNECTING -> CONNECTED` directly via the new FSM edge. Previously the FSM stayed stuck in `RECONNECTING` because the transition did not exist.
 10. (2.0) `switchMicrophone()` promotes `recvonly` / `inactive` transceivers to `sendrecv` so replacing the track actually transmits.
+11. (2.2) `#dispatch` runs the FSM in non-assert mode: events with no edge from the current state are no-ops. Do not add state guards around `#dispatch` calls for that reason alone.
+12. (2.2) `pc.connectionState === "disconnected"` is advisory (warning log), not an FSM event. Only `"failed"` / `"closed"` dispatch DISCONNECT.
+13. (2.2) `reconnecting` is published inside the backoff timer, when the attempt executes; for "full" strategy after `#connect()` has created the new PC. Every attempt arms `#reconnectTimeoutTimer` (`iceRestartTimeout` / `fullReconnectTimeout`); `#handleConnectionFailure` clears it first thing, and refuses to run from ERROR / IDLE.
+14. (2.2) `initialize()` attaches a pre-existing `#localStream` (mic enabled before init) via `#attachLocalStream` instead of acquiring a second stream or adding a recvonly transceiver.
+15. (2.2) `on()` is generic over `WebRTCEvents`; `#pubsub` is `PubSub<WebRTCEvents>` so `publish` payloads are type-checked too.
 
 ## Common Usage Patterns
 
@@ -417,6 +436,19 @@ manager.on("reconnect_failed", ({ attempts }) => {
   console.log(`Reconnection failed after ${attempts} attempts`);
 });
 ```
+
+## Changes (2.2)
+
+Bug-fix release, nothing removed. Observable changes:
+
+1. Invalid FSM events (e.g. `disconnect()` from IDLE / DISCONNECTED / ERROR, a failing signaling call while in ERROR) are no-ops instead of throwing `Invalid transition …`. Signaling methods now keep their `false` / `null` return contract in ERROR.
+2. `maxReconnectAttempts` is honored across the "full" strategy (the counter was reset by the internal `connect()` call, looping `1,2,3,1,2,3,…` with `reconnect_failed` never emitted).
+3. `pc.connectionState === "disconnected"` no longer transitions the FSM to DISCONNECTED.
+4. `reconnecting` fires when the attempt executes; for "full" only after the new PC exists (previously before the backoff, so a `createOffer()` in the handler hit the old PC).
+5. New config `iceRestartTimeout` (default 10000ms) bounds ice-restart attempts.
+6. A failed reconnect attempt counts as failed and continues to the next strategy instead of parking in ERROR.
+7. `enableMicrophone(true)` before `initialize()` attaches the stream to the PC (previously silently unattached).
+8. `on()` is typed per event (`on<K extends keyof WebRTCEvents>`).
 
 ## Breaking Changes (2.0)
 

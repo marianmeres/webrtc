@@ -54,7 +54,8 @@ const manager = new WebRTCManager<TContext>(factory, config);
 - `autoReconnect`: Enable automatic reconnection (default: false)
 - `maxReconnectAttempts`: Max reconnection attempts (default: 5)
 - `reconnectDelay`: Initial reconnection delay in ms (default: 1000)
-- `fullReconnectTimeout`: Timeout in ms for full reconnection to succeed (default: 30000)
+- `iceRestartTimeout`: Timeout in ms for an ICE-restart attempt to reach `CONNECTED` before the next attempt is scheduled (default: 10000)
+- `fullReconnectTimeout`: Timeout in ms for a full reconnection attempt to reach `CONNECTED` (default: 30000)
 - `shouldReconnect`: Callback to control whether reconnection should proceed (see below)
 - `logger`: Custom logger instance implementing `Logger` interface (default: console)
 
@@ -75,7 +76,7 @@ manager.context               // TContext | null - user-defined data
 ```typescript
 await manager.initialize()    // Initialize peer connection
 await manager.connect()       // Transition to CONNECTING state
-manager.disconnect()          // Disconnect and cleanup
+manager.disconnect()          // Disconnect and cleanup (state unchanged from IDLE / DISCONNECTED / ERROR)
 manager.reset()               // Reset to IDLE state (valid from any state)
 manager.dispose()             // Full teardown: cleanup + unsubscribe every listener
 ```
@@ -254,34 +255,36 @@ The callback receives:
 
 The manager uses two reconnection strategies with exponential backoff:
 
-1. **ICE Restart** (attempts 1-2): Lightweight reconnection that keeps the existing peer connection and restarts ICE negotiation. Works when the network path changed but the remote peer is still available.
+1. **ICE Restart** (attempts 1-2): Lightweight reconnection that keeps the existing peer connection and restarts ICE negotiation. Works when the network path changed but the remote peer is still available. The new local offer is emitted via `EVENT_ICE_RESTART_OFFER` — forward it through your signaling channel.
 
 2. **Full Reconnection** (attempts 3+): Creates a completely new peer connection. This is necessary when ICE restart fails, but **requires consumer action** to complete the signaling handshake.
 
+`EVENT_RECONNECTING` fires when an attempt actually executes (after its backoff delay), not when it is scheduled. The backoff itself is observable as `state_change → RECONNECTING`.
+
 #### Handling Full Reconnection
 
-When a full reconnection is triggered, the manager will:
+When a full reconnection attempt executes, the manager will:
 1. Clean up the old peer connection
-2. Create a new peer connection
-3. Emit `EVENT_RECONNECTING` with `strategy: 'full'`
+2. Create a new peer connection (fresh `initialize()`, state `CONNECTING`)
+3. Emit `EVENT_RECONNECTING` with `strategy: 'full'` — only **after** the new peer connection exists
 
-**Important:** The manager cannot automatically complete the signaling handshake for full reconnections. You must listen for the `reconnecting` event and re-establish signaling when the strategy is `'full'`:
+**Important:** The manager cannot automatically complete the signaling handshake for full reconnections. You must listen for the `reconnecting` event and re-establish signaling when the strategy is `'full'`. Because the event fires once the new connection is in place, `createOffer()` inside the handler lands on the right `RTCPeerConnection`:
 
 ```typescript
 manager.on(WebRTCManager.EVENT_RECONNECTING, async ({ attempt, strategy }) => {
   console.log(`Reconnecting (attempt ${attempt}, strategy: ${strategy})`);
 
   if (strategy === 'full') {
-    // Re-do the signaling handshake
+    // Re-do the signaling handshake on the new peer connection
     const offer = await manager.createOffer();
     await manager.setLocalDescription(offer);
     signalingChannel.send({ type: 'offer', offer });
   }
-  // For 'ice-restart', the manager handles it automatically
+  // For 'ice-restart', forward the offer from EVENT_ICE_RESTART_OFFER instead
 });
 ```
 
-If the full reconnection doesn't reach `CONNECTED` state within `fullReconnectTimeout` (default: 30 seconds), it's treated as a failed attempt and the next reconnection attempt begins (or `EVENT_RECONNECT_FAILED` is emitted if max attempts reached).
+Every attempt is bounded. An ICE-restart attempt that doesn't reach `CONNECTED` within `iceRestartTimeout` (default: 10 seconds), or a full attempt within `fullReconnectTimeout` (default: 30 seconds), counts as a failed attempt and the next one is scheduled — or `EVENT_RECONNECT_FAILED` is emitted once `maxReconnectAttempts` is exhausted. A failed attempt never parks the manager in `ERROR`; only `initialize()` failing during a full reconnect does (with an `error` event), and auto-reconnect does not run from `ERROR` — call `reset()`. Calling `connect()`, `disconnect()` or `reset()` yourself during the backoff cancels the scheduled attempt.
 
 ## Examples
 
@@ -532,6 +535,8 @@ The manager uses a finite state machine with the following states:
 
 ![State Diagram](states.png "State Diagram")
 
+How `RTCPeerConnection.connectionState` maps onto it: `"connected"` → `CONNECTED`; `"failed"` and `"closed"` → `DISCONNECTED` (and auto-reconnect starts when enabled); `"disconnected"` → **no transition**. Browsers report `"disconnected"` for transient ICE hiccups (a Wi-Fi switch, sleep/wake) and usually recover to `"connected"` on their own, so the manager only logs a warning and waits. A genuine loss surfaces as `"failed"` once ICE consent expires (typically tens of seconds).
+
 ## Testing
 
 The project includes two types of tests:
@@ -571,6 +576,26 @@ This example demonstrates:
 - Data channel creation and message passing
 - **Audio streaming via WebRTC media tracks** (click "Send Beep" to transmit generated audio)
 - State change monitoring
+
+## Changes in 2.2
+
+Bug-fix release; nothing is removed. Audit the following if you relied on the old behavior:
+
+1. **Invalid FSM events are no-ops, never throws.** `disconnect()` from `IDLE` / `DISCONNECTED` / `ERROR`, or a failing signaling call while already in `ERROR`, previously threw `Invalid transition …` from the underlying FSM — masking the real error and breaking the documented `false` / `null` return contract. They are now ignored (debug log only).
+
+2. **`maxReconnectAttempts` is honored.** Once the full strategy kicked in (attempt 3+), the internal `connect()` call reset the attempt counter, so the sequence looped `1, 2, 3, 1, 2, 3, …` forever and `reconnect_failed` never fired. The counter now survives internal reconnects; an explicit `connect()` / `disconnect()` / `reset()` / `dispose()` still resets it.
+
+3. **Transient `"disconnected"` no longer moves the FSM to `DISCONNECTED`** (see the State Machine note above). Previously the FSM parked in `DISCONNECTED` next to a live connection once the browser recovered, and a `connect()` from there tore the healthy connection down. A UI that showed "disconnected" on that transition now sees it only on `"failed"`.
+
+4. **`reconnecting` fires when the attempt executes, not when it is scheduled.** For `strategy: 'full'` that is after the new peer connection exists, so `createOffer()` in the handler is safe. Previously it ran against the old, failed connection and the remote answer then failed on the new one.
+
+5. **ICE-restart attempts are bounded** by the new `iceRestartTimeout` config (default 10 s). Previously a restart whose offer was never answered kept the manager in `RECONNECTING` indefinitely.
+
+6. **A failed reconnect attempt no longer parks the FSM in `ERROR`**; it counts as a failed attempt and the next strategy runs. Auto-reconnect does not run from `ERROR` (call `reset()`).
+
+7. **`enableMicrophone(true)` before `initialize()`** now attaches that stream to the peer connection. Previously the stream was kept but never sent — no audio track and no audio transceiver.
+
+8. **`on()` is typed per event**: `on<K extends keyof WebRTCEvents>(event: K, handler: (data: WebRTCEvents[K]) => void)`. Handlers typed `(data: any)` keep compiling; a handler with a wrong payload type is now a compile error.
 
 ## Upgrading from 1.x to 2.x
 

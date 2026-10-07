@@ -76,7 +76,7 @@ export class WebRTCManager<TContext = unknown> {
 	static readonly EVENT_NEGOTIATION_NEEDED = "negotiation_needed";
 
 	#fsm: FSM<WebRTCState, WebRTCFsmEvent>;
-	#pubsub: PubSub;
+	#pubsub: PubSub<WebRTCEvents>;
 	#pc: RTCPeerConnection | null = null;
 	#factory: WebRTCFactory;
 	#config: WebRTCManagerConfig;
@@ -107,7 +107,9 @@ export class WebRTCManager<TContext = unknown> {
 	 */
 	context: TContext | null = null;
 	#reconnectTimer: number | null = null;
-	#fullReconnectTimeoutTimer: number | null = null;
+	// Bounds a single reconnection attempt (either strategy): if CONNECTED is not
+	// reached in time, the attempt counts as failed and the next one is scheduled.
+	#reconnectTimeoutTimer: number | null = null;
 	#deviceChangeHandler: (() => void) | null = null;
 
 	/**
@@ -228,13 +230,16 @@ export class WebRTCManager<TContext = unknown> {
 	}
 
 	/**
-	 * Subscribe to a specific WebRTC event.
+	 * Subscribe to a specific WebRTC event. The handler's `data` parameter is
+	 * typed from {@link WebRTCEvents} for the given event name.
 	 * @param event - The event name to subscribe to (e.g., "state_change", "ice_candidate").
 	 * @param handler - Callback function that receives the event data.
 	 * @returns Unsubscribe function to remove the event listener.
 	 */
-	// deno-lint-ignore no-explicit-any
-	on(event: keyof WebRTCEvents, handler: (data: any) => void): () => void {
+	on<K extends keyof WebRTCEvents>(
+		event: K,
+		handler: (data: WebRTCEvents[K]) => void
+	): () => void {
 		return this.#pubsub.subscribe(event, handler);
 	}
 
@@ -393,7 +398,13 @@ export class WebRTCManager<TContext = unknown> {
 			// Setup device change detection now that we have a connection
 			this.#setupDeviceChangeListener();
 
-			if (this.#config.enableMicrophone) {
+			if (this.#localStream) {
+				// Microphone was enabled before initialize() (e.g. to get labeled
+				// device names up front). Attach that stream instead of acquiring a
+				// second one or adding a recvonly transceiver that would never send.
+				this.#logger.debug("Attaching pre-acquired local stream.");
+				await this.#attachLocalStream(this.#localStream);
+			} else if (this.#config.enableMicrophone) {
 				this.#logger.debug("Enabling microphone as per configuration.");
 				const success = await this.enableMicrophone(true);
 				if (!success) {
@@ -440,6 +451,15 @@ export class WebRTCManager<TContext = unknown> {
 			this.#reconnectAttempts = 0;
 		}
 
+		await this.#connect();
+	}
+
+	/**
+	 * connect() minus the reconnect-budget reset. The auto-reconnect path calls
+	 * this directly: it resets the FSM to IDLE before reconnecting, and resetting
+	 * the attempt counter there would make `maxReconnectAttempts` unreachable.
+	 */
+	async #connect(): Promise<void> {
 		// Initialize if needed
 		if (this.state === WebRTCState.IDLE) {
 			this.#logger.debug("State is IDLE, initializing first.");
@@ -496,26 +516,7 @@ export class WebRTCManager<TContext = unknown> {
 				this.#pubsub.publish(WebRTCManager.EVENT_LOCAL_STREAM, stream);
 
 				if (this.#pc) {
-					// Check if we have an existing audio transceiver
-					const transceivers = this.#pc.getTransceivers();
-					const audioTransceiver = transceivers.find(
-						(t) => t.receiver.track.kind === "audio"
-					);
-
-					if (audioTransceiver && audioTransceiver.sender) {
-						// Replace the track in existing transceiver
-						const track = stream.getAudioTracks()[0];
-						await audioTransceiver.sender.replaceTrack(track);
-						// Update direction to sendrecv
-						audioTransceiver.direction = "sendrecv";
-						this.#logger.debug("Replaced track in existing transceiver.");
-					} else {
-						// Add track normally
-						stream.getTracks().forEach((track) => {
-							this.#pc!.addTrack(track, stream);
-						});
-						this.#logger.debug("Added tracks to peer connection.");
-					}
+					await this.#attachLocalStream(stream);
 				}
 				this.#logger.debug("Microphone enabled successfully.");
 				return true;
@@ -824,19 +825,28 @@ export class WebRTCManager<TContext = unknown> {
 			return false;
 		}
 		try {
-			const offer = await this.#pc.createOffer({ iceRestart: true });
-			await this.#pc.setLocalDescription(offer);
-			// A real ICE restart requires the new offer to reach the remote peer
-			// and an answer to come back. Emit the offer so consumers can forward it
-			// via their signaling channel. Without this, ICE restart silently fails.
-			this.#pubsub.publish(WebRTCManager.EVENT_ICE_RESTART_OFFER, offer);
-			this.#logger.debug("ICE restart initiated.");
+			await this.#doIceRestart(this.#pc);
 			return true;
 		} catch (e) {
 			this.#logError(e);
 			this.#handleError(e);
 			return false;
 		}
+	}
+
+	/**
+	 * ICE restart core without the ERROR-state side effect, so the auto-reconnect
+	 * loop can treat a failed restart as a failed attempt (and move on to a full
+	 * reconnect) instead of parking the FSM in ERROR.
+	 */
+	async #doIceRestart(pc: RTCPeerConnection): Promise<void> {
+		const offer = await pc.createOffer({ iceRestart: true });
+		await pc.setLocalDescription(offer);
+		// A real ICE restart requires the new offer to reach the remote peer
+		// and an answer to come back. Emit the offer so consumers can forward it
+		// via their signaling channel. Without this, ICE restart silently fails.
+		this.#pubsub.publish(WebRTCManager.EVENT_ICE_RESTART_OFFER, offer);
+		this.#logger.debug("ICE restart initiated.");
 	}
 
 	/**
@@ -940,7 +950,15 @@ export class WebRTCManager<TContext = unknown> {
 
 	#dispatch(event: WebRTCFsmEvent) {
 		const oldState = this.#fsm.state;
-		this.#fsm.transition(event);
+		// Non-assert mode: an event with no edge from the current state is a
+		// no-op (returns null) rather than a throw. Callers depend on that, e.g. a
+		// second disconnect(), or an error reported while already in ERROR.
+		if (this.#fsm.transition(event, undefined, false) === null) {
+			this.#logger.debug(
+				`Ignored event ${event} in state ${oldState} (no transition defined).`
+			);
+			return;
+		}
 		const newState = this.#fsm.state;
 
 		if (oldState !== newState) {
@@ -988,10 +1006,7 @@ export class WebRTCManager<TContext = unknown> {
 				) {
 					// Connection successful - reset reconnect attempts and clear any pending timeout
 					this.#reconnectAttempts = 0;
-					if (this.#fullReconnectTimeoutTimer !== null) {
-						clearTimeout(this.#fullReconnectTimeoutTimer);
-						this.#fullReconnectTimeoutTimer = null;
-					}
+					this.#clearReconnectTimeout();
 					this.#dispatch(WebRTCFsmEvent.CONNECTED);
 				} else {
 					this.#logger.debug(
@@ -1001,7 +1016,17 @@ export class WebRTCManager<TContext = unknown> {
 			} else if (state === "failed") {
 				// Connection failed - attempt reconnection if enabled
 				this.#handleConnectionFailure();
-			} else if (state === "disconnected" || state === "closed") {
+			} else if (state === "disconnected") {
+				// Transient by spec: ICE commonly recovers on its own after a network
+				// blip or sleep/wake, in which case the PC flips back to "connected"
+				// without any renegotiation. Do not touch the FSM here, otherwise it
+				// ends up DISCONNECTED next to a live, working connection. A genuine
+				// loss surfaces as "failed" (once ICE consent expires) and is handled
+				// above.
+				this.#logWarn(
+					"Peer connection reported 'disconnected' (transient); waiting for recovery or 'failed'."
+				);
+			} else if (state === "closed") {
 				// Only dispatch if not already in a terminal state.
 				// Also skip INITIALIZING (no DISCONNECT transition is meaningful there —
 				// initialize() owns that state and will handle failure via ERROR).
@@ -1059,11 +1084,8 @@ export class WebRTCManager<TContext = unknown> {
 			this.#reconnectTimer = null;
 		}
 
-		// Clear any pending full reconnection timeout
-		if (this.#fullReconnectTimeoutTimer !== null) {
-			clearTimeout(this.#fullReconnectTimeoutTimer);
-			this.#fullReconnectTimeoutTimer = null;
-		}
+		// Clear any pending reconnection attempt timeout
+		this.#clearReconnectTimeout();
 
 		// Remove device change listener
 		if (this.#deviceChangeHandler) {
@@ -1121,12 +1143,20 @@ export class WebRTCManager<TContext = unknown> {
 	#handleConnectionFailure() {
 		this.#logger.debug("Handling connection failure.");
 
-		// Only dispatch DISCONNECT if not already in a terminal state
-		if (
-			this.state !== WebRTCState.DISCONNECTED &&
-			this.state !== WebRTCState.ERROR &&
-			this.state !== WebRTCState.IDLE
-		) {
+		// Whatever attempt was in flight is over; never let its timeout fire on
+		// top of the next one.
+		this.#clearReconnectTimeout();
+
+		// ERROR is sticky by contract (requires reset()), and IDLE means there is
+		// no session to recover. Auto-reconnect must not run from either.
+		if (this.state === WebRTCState.ERROR || this.state === WebRTCState.IDLE) {
+			this.#logger.debug(
+				`Not handling connection failure in state ${this.state}.`
+			);
+			return;
+		}
+
+		if (this.state !== WebRTCState.DISCONNECTED) {
 			this.#dispatch(WebRTCFsmEvent.DISCONNECT);
 		}
 
@@ -1177,63 +1207,117 @@ export class WebRTCManager<TContext = unknown> {
 
 	#attemptReconnect() {
 		this.#reconnectAttempts++;
+		const attempt = this.#reconnectAttempts;
 		const baseDelay = this.#config.reconnectDelay ?? 1000;
-		const delay = baseDelay * Math.pow(2, this.#reconnectAttempts - 1);
+		const delay = baseDelay * Math.pow(2, attempt - 1);
 
 		// Try ICE restart first (attempts 1-2), then full reconnect
-		const strategy = this.#reconnectAttempts <= 2 ? "ice-restart" : "full";
+		const strategy = attempt <= 2 ? "ice-restart" : "full";
 
 		this.#logger.debug(
-			`Attempting reconnection (attempt ${this.#reconnectAttempts}, strategy: ${strategy}, delay: ${delay}ms).`
+			`Scheduling reconnection (attempt ${attempt}, strategy: ${strategy}, delay: ${delay}ms).`
 		);
-
-		this.#pubsub.publish(WebRTCManager.EVENT_RECONNECTING, {
-			attempt: this.#reconnectAttempts,
-			strategy,
-		});
 
 		this.#reconnectTimer = setTimeout(async () => {
 			this.#reconnectTimer = null;
 
-			if (strategy === "ice-restart" && this.#pc) {
-				// Try ICE restart - keep existing connection
-				const success = await this.iceRestart();
-				if (!success) {
-					// ICE restart failed, will try again or switch to full reconnect
-					this.#handleConnectionFailure();
-				}
-				// If successful, onconnectionstatechange will reset attempts
-			} else {
-				// Full reconnection - create new connection
-				// IMPORTANT: This will only initialize the connection. Consumers MUST
-				// listen for the 'reconnecting' event with strategy='full' and manually
-				// perform the signaling handshake (create offer/answer exchange) to
-				// complete the reconnection.
-				try {
-					// Clean up old connection and reset to IDLE so connect() creates a new PC
+			// Someone acted during the backoff (explicit connect()/disconnect()/
+			// reset(), or the PC recovered on its own). Their outcome wins.
+			if (this.state !== WebRTCState.RECONNECTING) {
+				this.#logger.debug(
+					`Skipping scheduled reconnection because state is ${this.state}.`
+				);
+				return;
+			}
+
+			try {
+				if (strategy === "ice-restart" && this.#pc) {
+					// Keep the existing connection, restart ICE. The offer itself is
+					// delivered via EVENT_ICE_RESTART_OFFER; `reconnecting` is informational.
+					this.#pubsub.publish(WebRTCManager.EVENT_RECONNECTING, {
+						attempt,
+						strategy,
+					});
+					await this.#doIceRestart(this.#pc);
+					// Without a bound here a restart whose offer is never answered
+					// would park the FSM in RECONNECTING forever: the PC is already
+					// "failed", so no further connectionstatechange is coming.
+					this.#startReconnectTimeout(this.#config.iceRestartTimeout ?? 10000);
+				} else {
+					// Full reconnection - tear down and create a new peer connection.
+					// Consumers MUST perform the signaling handshake (offer/answer
+					// exchange) on the new PC to complete it; the manager cannot.
 					this.#cleanup();
 					this.#dispatch(WebRTCFsmEvent.RESET);
-					await this.connect();
-
-					// Start timeout for full reconnection - if connection doesn't succeed
-					// within the timeout, treat it as a failure
-					const timeout = this.#config.fullReconnectTimeout ?? 30000;
-					this.#fullReconnectTimeoutTimer = setTimeout(() => {
-						this.#fullReconnectTimeoutTimer = null;
-						// Only trigger failure if still not connected
-						if (this.state !== WebRTCState.CONNECTED) {
-							this.#logger.debug(
-								"Full reconnection timeout reached, connection was not established."
-							);
-							this.#handleConnectionFailure();
-						}
-					}, timeout) as unknown as number;
-				} catch (e) {
-					this.#logError("Reconnection failed.", e);
-					this.#handleConnectionFailure();
+					await this.#connect();
+					// Read through the FSM: TS still has `this.state` narrowed from the
+					// guard above, but it changed during the await.
+					if (this.#fsm.state !== WebRTCState.CONNECTING) {
+						// initialize() failed and already moved the FSM to ERROR
+						// (with an `error` event); nothing to announce or wait for.
+						this.#logger.debug(
+							`Full reconnection aborted, state is ${this.#fsm.state} after connect.`
+						);
+						return;
+					}
+					// Published only now, once the new PC exists, so a handler can
+					// call createOffer() right away and have it land on the right PC.
+					this.#pubsub.publish(WebRTCManager.EVENT_RECONNECTING, {
+						attempt,
+						strategy: "full",
+					});
+					this.#startReconnectTimeout(this.#config.fullReconnectTimeout ?? 30000);
 				}
+			} catch (e) {
+				// A failed attempt is just that - count it and move on to the next
+				// strategy rather than parking in ERROR.
+				this.#logError("Reconnection attempt failed.", e);
+				this.#handleConnectionFailure();
 			}
 		}, delay) as unknown as number;
+	}
+
+	#startReconnectTimeout(timeout: number) {
+		this.#clearReconnectTimeout();
+		this.#reconnectTimeoutTimer = setTimeout(() => {
+			this.#reconnectTimeoutTimer = null;
+			if (this.state !== WebRTCState.CONNECTED) {
+				this.#logger.debug(
+					"Reconnection attempt timed out before reaching CONNECTED."
+				);
+				this.#handleConnectionFailure();
+			}
+		}, timeout) as unknown as number;
+	}
+
+	#clearReconnectTimeout() {
+		if (this.#reconnectTimeoutTimer !== null) {
+			clearTimeout(this.#reconnectTimeoutTimer);
+			this.#reconnectTimeoutTimer = null;
+		}
+	}
+
+	/**
+	 * Wires `stream` into the peer connection: reuses the audio transceiver when
+	 * one exists (flipping it to sendrecv), otherwise adds the tracks outright.
+	 */
+	async #attachLocalStream(stream: MediaStream): Promise<void> {
+		if (!this.#pc) return;
+		const audioTransceiver = this.#pc
+			.getTransceivers()
+			.find((t) => t.receiver.track?.kind === "audio");
+		const audioTrack = stream.getAudioTracks()[0];
+
+		if (audioTransceiver && audioTrack) {
+			await audioTransceiver.sender.replaceTrack(audioTrack);
+			audioTransceiver.direction = "sendrecv";
+			this.#logger.debug("Replaced track in existing transceiver.");
+		} else {
+			stream.getTracks().forEach((track) => {
+				this.#pc!.addTrack(track, stream);
+			});
+			this.#logger.debug("Added tracks to peer connection.");
+		}
 	}
 
 	#setupDeviceChangeListener() {
