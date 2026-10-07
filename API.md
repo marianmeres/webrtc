@@ -37,32 +37,32 @@ new WebRTCManager<TContext = unknown>(factory: WebRTCFactory, config?: WebRTCMan
 
 **Type Parameters:**
 
-| Name | Default | Description |
-|------|---------|-------------|
+| Name     | Default   | Description                     |
+| -------- | --------- | ------------------------------- |
 | TContext | `unknown` | Type for the `context` property |
 
 **Parameters:**
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| factory | `WebRTCFactory` | Yes | Factory for creating WebRTC primitives |
-| config | `WebRTCManagerConfig` | No | Configuration options |
+| Name    | Type                  | Required | Description                            |
+| ------- | --------------------- | -------- | -------------------------------------- |
+| factory | `WebRTCFactory`       | Yes      | Factory for creating WebRTC primitives |
+| config  | `WebRTCManagerConfig` | No       | Configuration options                  |
 
 **Example:**
 
 ```typescript
-import { WebRTCManager } from '@marianmeres/webrtc';
+import { WebRTCManager } from "@marianmeres/webrtc";
 
 const factory = {
-  createPeerConnection: (config) => new RTCPeerConnection(config),
-  getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-  enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
+	createPeerConnection: (config) => new RTCPeerConnection(config),
+	getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+	enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
 };
 
 const manager = new WebRTCManager(factory, {
-  peerConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
-  enableMicrophone: true,
-  autoReconnect: true,
+	peerConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
+	enableMicrophone: true,
+	autoReconnect: true,
 });
 ```
 
@@ -78,7 +78,8 @@ get state(): WebRTCState
 
 Returns the current state of the WebRTC connection.
 
-**Returns:** `WebRTCState` - One of: `IDLE`, `INITIALIZING`, `CONNECTING`, `CONNECTED`, `RECONNECTING`, `DISCONNECTED`, `ERROR`
+**Returns:** `WebRTCState` - One of: `IDLE`, `INITIALIZING`, `CONNECTING`, `CONNECTED`,
+`RECONNECTING`, `DISCONNECTED`, `ERROR`
 
 ---
 
@@ -100,7 +101,9 @@ Returns the local media stream (microphone audio), or `null` if not initialized.
 get remoteStream(): MediaStream | null
 ```
 
-Returns the **first** remote media stream received from the peer, or `null` if not connected. Provided for backwards compatibility; prefer `remoteStreams` when the remote side may publish more than one stream.
+Returns the **first** remote media stream received from the peer, or `null` if not
+connected. Provided for backwards compatibility; prefer `remoteStreams` when the remote
+side may publish more than one stream.
 
 **Returns:** `MediaStream | null`
 
@@ -112,7 +115,10 @@ Returns the **first** remote media stream received from the peer, or `null` if n
 get remoteStreams(): ReadonlyMap<string, MediaStream>
 ```
 
-Returns every remote media stream received so far, keyed by `stream.id`. Populated incrementally as `ontrack` events fire. Useful when the remote peer publishes multiple streams (e.g. separate audio and video, or audio from multiple participants in an SFU-style setup).
+Returns every remote media stream received so far, keyed by `stream.id`. Populated
+incrementally as `ontrack` events fire. Useful when the remote peer publishes multiple
+streams (e.g. separate audio and video, or audio from multiple participants in an
+SFU-style setup).
 
 **Returns:** `ReadonlyMap<string, MediaStream>`
 
@@ -147,10 +153,11 @@ Returns the underlying RTCPeerConnection, or `null` if not initialized.
 #### context
 
 ```typescript
-context: TContext | null
+context: TContext | null;
 ```
 
-User-defined context object for storing arbitrary data associated with this manager. The class accepts an optional generic type parameter for type-safe context access.
+User-defined context object for storing arbitrary data associated with this manager. The
+class accepts an optional generic type parameter for type-safe context access.
 
 **Type Parameter:** `TContext` - The type of the context object (default: `unknown`)
 
@@ -160,13 +167,15 @@ User-defined context object for storing arbitrary data associated with this mana
 
 ```typescript
 // With type parameter for full type safety:
-const manager = new WebRTCManager<{ audioStream: MediaStream; sessionId: string }>(factory);
-manager.context = { audioStream: myStream, sessionId: '123' };
+const manager = new WebRTCManager<{ audioStream: MediaStream; sessionId: string }>(
+	factory,
+);
+manager.context = { audioStream: myStream, sessionId: "123" };
 manager.context.audioStream; // typed as MediaStream
 
 // Without type parameter (backwards compatible):
 const manager = new WebRTCManager(factory);
-manager.context = { anything: 'goes' };
+manager.context = { anything: "goes" };
 ```
 
 ---
@@ -206,15 +215,21 @@ console.log(manager.state); // "INITIALIZING"
 async connect(): Promise<void>
 ```
 
-Transitions to the `CONNECTING` state. Automatically calls `initialize()` if in `IDLE` state. If `DISCONNECTED`, reinitializes the peer connection.
+Transitions to the `CONNECTING` state. Automatically calls `initialize()` if in `IDLE`
+state. If `DISCONNECTED`, reinitializes the peer connection.
 
 **State Transitions:**
+
 - From `IDLE`: Initializes first, then transitions to `CONNECTING`
 - From `DISCONNECTED`: Cleans up, resets, and reinitializes
 - From `INITIALIZING`: Transitions to `CONNECTING`
 - From `CONNECTED` or `CONNECTING`: No-op
 
-**Side effects (2.0):** Resets the internal reconnect attempts counter when starting a fresh session, so a previously-exhausted reconnect budget does not block new attempts. (2.2) The auto-reconnect path bypasses this reset so `maxReconnectAttempts` is honored across full reconnects. Calling `connect()` while an attempt is scheduled (state `RECONNECTING`) cancels that attempt.
+**Side effects (2.0):** Resets the internal reconnect attempts counter when starting a
+fresh session, so a previously-exhausted reconnect budget does not block new attempts.
+(2.2) The auto-reconnect path bypasses this reset so `maxReconnectAttempts` is honored
+across full reconnects. Calling `connect()` while an attempt is scheduled (state
+`RECONNECTING`) cancels that attempt.
 
 **Example:**
 
@@ -232,14 +247,18 @@ disconnect(): void
 ```
 
 Disconnects the peer connection and cleans up all resources:
+
 - Closes all data channels
 - Stops local media tracks
 - Closes peer connection
 - Clears reconnection timers
-- (2.0) Publishes `local_stream` / `remote_stream` with `null` payload so UIs drop stale stream references
+- (2.0) Publishes `local_stream` / `remote_stream` with `null` payload so UIs drop stale
+  stream references
 - (2.0) Resets the reconnect attempts counter
 
-**Transitions:** `INITIALIZING` / `CONNECTING` / `CONNECTED` / `RECONNECTING` → `DISCONNECTED`. From `IDLE`, `DISCONNECTED` or `ERROR` the state is unchanged (resources are still cleaned up). (2.2) Previously those calls threw `Invalid transition …`.
+**Transitions:** `INITIALIZING` / `CONNECTING` / `CONNECTED` / `RECONNECTING` →
+`DISCONNECTED`. From `IDLE`, `DISCONNECTED` or `ERROR` the state is unchanged (resources
+are still cleaned up). (2.2) Previously those calls threw `Invalid transition …`.
 
 **Example:**
 
@@ -256,11 +275,14 @@ console.log(manager.state); // "DISCONNECTED"
 reset(): void
 ```
 
-Resets the manager to `IDLE` state from any state. Performs full cleanup and allows reinitialization.
+Resets the manager to `IDLE` state from any state. Performs full cleanup and allows
+reinitialization.
 
 **Transitions:** Any state → `IDLE`
 
-**Changed in 2.0:** Now works correctly from every state. In 1.x, calling `reset()` from `INITIALIZING` / `CONNECTING` / `CONNECTED` silently no-op'd because those FSM transitions didn't exist.
+**Changed in 2.0:** Now works correctly from every state. In 1.x, calling `reset()` from
+`INITIALIZING` / `CONNECTING` / `CONNECTED` silently no-op'd because those FSM transitions
+didn't exist.
 
 **Example:**
 
@@ -278,9 +300,12 @@ console.log(manager.state); // "IDLE"
 dispose(): void
 ```
 
-Fully disposes the manager. Unsubscribes every listener registered via `on()` or `subscribe()`, closes the peer connection, stops streams, and transitions to `IDLE`. Idempotent. After calling this, the manager should not be reused.
+Fully disposes the manager. Unsubscribes every listener registered via `on()` or
+`subscribe()`, closes the peer connection, stops streams, and transitions to `IDLE`.
+Idempotent. After calling this, the manager should not be reused.
 
-Use this in framework teardown hooks (React `useEffect` cleanup, Svelte `onDestroy`, Vue `onUnmounted`, etc.) instead of tracking each returned unsubscribe handle manually.
+Use this in framework teardown hooks (React `useEffect` cleanup, Svelte `onDestroy`, Vue
+`onUnmounted`, etc.) instead of tracking each returned unsubscribe handle manually.
 
 **Added in:** 2.0
 
@@ -288,7 +313,7 @@ Use this in framework teardown hooks (React `useEffect` cleanup, Svelte `onDestr
 
 ```typescript
 onDestroy(() => {
-  manager.dispose();
+	manager.dispose();
 });
 ```
 
@@ -306,13 +331,14 @@ Enables or disables the microphone.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name   | Type      | Description                          |
+| ------ | --------- | ------------------------------------ |
 | enable | `boolean` | `true` to enable, `false` to disable |
 
 **Returns:** `boolean` - `true` if successful, `false` if failed
 
 **Events Emitted:**
+
 - `local_stream` - When stream changes
 - `microphone_failed` - On failure
 
@@ -321,7 +347,7 @@ Enables or disables the microphone.
 ```typescript
 const success = await manager.enableMicrophone(true);
 if (success) {
-  console.log('Microphone enabled');
+	console.log("Microphone enabled");
 }
 ```
 
@@ -337,15 +363,18 @@ Switches the active microphone to a different audio input device.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name     | Type     | Description                             |
+| -------- | -------- | --------------------------------------- |
 | deviceId | `string` | Device ID from `getAudioInputDevices()` |
 
 **Returns:** `boolean` - `true` if successful, `false` otherwise
 
 **Requirements:** Peer connection must be initialized and microphone must be enabled.
 
-**Changed in 2.0:** Also promotes `recvonly` / `inactive` audio transceivers to `sendrecv`. In 1.x, switching the mic on a connection initialized with `enableMicrophone: false` would replace the track but leave the direction as `recvonly`, silently producing no audio.
+**Changed in 2.0:** Also promotes `recvonly` / `inactive` audio transceivers to
+`sendrecv`. In 1.x, switching the mic on a connection initialized with
+`enableMicrophone: false` would replace the track but leave the direction as `recvonly`,
+silently producing no audio.
 
 **Example:**
 
@@ -370,7 +399,7 @@ Retrieves all available audio input devices.
 
 ```typescript
 const devices = await manager.getAudioInputDevices();
-devices.forEach(d => console.log(d.label, d.deviceId));
+devices.forEach((d) => console.log(d.label, d.deviceId));
 ```
 
 ---
@@ -383,22 +412,24 @@ devices.forEach(d => console.log(d.label, d.deviceId));
 createDataChannel(label: string, options?: RTCDataChannelInit): RTCDataChannel | null
 ```
 
-Creates a new data channel with the specified label. Returns existing channel if one with the same label already exists.
+Creates a new data channel with the specified label. Returns existing channel if one with
+the same label already exists.
 
 **Parameters:**
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| label | `string` | Yes | Unique identifier for the channel |
-| options | `RTCDataChannelInit` | No | Channel configuration |
+| Name    | Type                 | Required | Description                       |
+| ------- | -------------------- | -------- | --------------------------------- |
+| label   | `string`             | Yes      | Unique identifier for the channel |
+| options | `RTCDataChannelInit` | No       | Channel configuration             |
 
-**Returns:** `RTCDataChannel | null` - The channel, or `null` if peer connection not initialized
+**Returns:** `RTCDataChannel | null` - The channel, or `null` if peer connection not
+initialized
 
 **Example:**
 
 ```typescript
-const chatChannel = manager.createDataChannel('chat');
-const fileChannel = manager.createDataChannel('file-transfer', { ordered: true });
+const chatChannel = manager.createDataChannel("chat");
+const fileChannel = manager.createDataChannel("file-transfer", { ordered: true });
 ```
 
 ---
@@ -413,8 +444,8 @@ Retrieves an existing data channel by label.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name  | Type     | Description       |
+| ----- | -------- | ----------------- |
 | label | `string` | The channel label |
 
 **Returns:** `RTCDataChannel | undefined`
@@ -422,9 +453,9 @@ Retrieves an existing data channel by label.
 **Example:**
 
 ```typescript
-const channel = manager.getDataChannel('chat');
-if (channel?.readyState === 'open') {
-  // Channel is ready
+const channel = manager.getDataChannel("chat");
+if (channel?.readyState === "open") {
+	// Channel is ready
 }
 ```
 
@@ -440,10 +471,10 @@ Sends data through a data channel. Verifies channel exists and is open before se
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
-| label | `string` | The channel label |
-| data | `string \| Blob \| ArrayBuffer \| ArrayBufferView` | Data to send |
+| Name  | Type                                               | Description       |
+| ----- | -------------------------------------------------- | ----------------- |
+| label | `string`                                           | The channel label |
+| data  | `string \| Blob \| ArrayBuffer \| ArrayBufferView` | Data to send      |
 
 **Returns:** `boolean` - `true` if sent, `false` otherwise
 
@@ -451,11 +482,11 @@ Sends data through a data channel. Verifies channel exists and is open before se
 
 ```typescript
 // Send string
-manager.sendData('chat', 'Hello!');
+manager.sendData("chat", "Hello!");
 
 // Send binary
 const buffer = new ArrayBuffer(8);
-manager.sendData('binary', buffer);
+manager.sendData("binary", buffer);
 ```
 
 ---
@@ -472,8 +503,8 @@ Creates an SDP offer for initiating a WebRTC connection.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name    | Type              | Description                  |
+| ------- | ----------------- | ---------------------------- |
 | options | `RTCOfferOptions` | Optional offer configuration |
 
 **Returns:** `RTCSessionDescriptionInit | null` - The offer, or `null` on error
@@ -498,8 +529,8 @@ Creates an SDP answer in response to a received offer.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name    | Type               | Description                   |
+| ------- | ------------------ | ----------------------------- |
 | options | `RTCAnswerOptions` | Optional answer configuration |
 
 **Returns:** `RTCSessionDescriptionInit | null` - The answer, or `null` on error
@@ -525,8 +556,8 @@ Sets the local SDP description (offer or answer).
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name        | Type                        | Description         |
+| ----------- | --------------------------- | ------------------- |
 | description | `RTCSessionDescriptionInit` | The SDP description |
 
 **Returns:** `boolean` - `true` if successful
@@ -550,8 +581,8 @@ Sets the remote SDP description received from the peer.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name        | Type                        | Description    |
+| ----------- | --------------------------- | -------------- |
 | description | `RTCSessionDescriptionInit` | The remote SDP |
 
 **Returns:** `boolean` - `true` if successful
@@ -575,8 +606,8 @@ Adds an ICE candidate received from the remote peer.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name      | Type                          | Description                                        |
+| --------- | ----------------------------- | -------------------------------------------------- |
 | candidate | `RTCIceCandidateInit \| null` | The ICE candidate, or `null` for end-of-candidates |
 
 **Returns:** `boolean` - `true` if successful
@@ -596,17 +627,21 @@ await manager.addIceCandidate(remoteCandidate);
 async iceRestart(): Promise<boolean>
 ```
 
-Performs an ICE restart to recover from connection issues. Creates a new offer with the `iceRestart` flag, sets it as the local description, and emits `ice_restart_offer` with the new offer.
+Performs an ICE restart to recover from connection issues. Creates a new offer with the
+`iceRestart` flag, sets it as the local description, and emits `ice_restart_offer` with
+the new offer.
 
 **Returns:** `boolean` - `true` if successful
 
-**Changed in 2.0:** Emits `EVENT_ICE_RESTART_OFFER` with the new local offer. Consumers **must** forward this offer to the remote peer via their signaling channel — otherwise the ICE restart silently has no effect. In 1.x the offer never left the library.
+**Changed in 2.0:** Emits `EVENT_ICE_RESTART_OFFER` with the new local offer. Consumers
+**must** forward this offer to the remote peer via their signaling channel — otherwise the
+ICE restart silently has no effect. In 1.x the offer never left the library.
 
 **Example:**
 
 ```typescript
 manager.on(WebRTCManager.EVENT_ICE_RESTART_OFFER, (offer) => {
-  signalingChannel.send({ type: "offer", offer });
+	signalingChannel.send({ type: "offer", offer });
 });
 
 const success = await manager.iceRestart();
@@ -622,13 +657,16 @@ const success = await manager.iceRestart();
 gatherIceCandidates(options?: GatherIceCandidatesOptions): Promise<void>
 ```
 
-Waits for ICE gathering to complete. Useful for HTTP-POST signaling patterns where you need the local description to bundle all candidates before sending.
+Waits for ICE gathering to complete. Useful for HTTP-POST signaling patterns where you
+need the local description to bundle all candidates before sending.
 
 **Parameters:** See [GatherIceCandidatesOptions](#gathericecandidatesoptions).
 
-**Returns:** `Promise<void>` — resolves when gathering completes, rejects on timeout (unless `resolveOnTimeout: true`) or if the peer connection is not initialized.
+**Returns:** `Promise<void>` — resolves when gathering completes, rejects on timeout
+(unless `resolveOnTimeout: true`) or if the peer connection is not initialized.
 
-**Changed in 2.0:** The `onCandidate` callback no longer receives the terminal `null` sentinel. End-of-gathering is signaled exclusively by the promise resolving.
+**Changed in 2.0:** The `onCandidate` callback no longer receives the terminal `null`
+sentinel. End-of-gathering is signaled exclusively by the promise resolving.
 
 **Example:**
 
@@ -679,8 +717,8 @@ Retrieves WebRTC statistics for the peer connection.
 
 ```typescript
 const stats = await manager.getStats();
-stats?.forEach(report => {
-  console.log(report.type, report);
+stats?.forEach((report) => {
+	console.log(report.type, report);
 });
 ```
 
@@ -701,18 +739,18 @@ Subscribe to a specific WebRTC event.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
-| event | `keyof WebRTCEvents` | Event name |
-| handler | `function` | Callback receiving event data |
+| Name    | Type                 | Description                   |
+| ------- | -------------------- | ----------------------------- |
+| event   | `keyof WebRTCEvents` | Event name                    |
+| handler | `function`           | Callback receiving event data |
 
 **Returns:** `() => void` - Unsubscribe function
 
 **Example:**
 
 ```typescript
-const unsub = manager.on('state_change', (state) => {
-  console.log('New state:', state);
+const unsub = manager.on("state_change", (state) => {
+	console.log("New state:", state);
 });
 
 // Later: unsub();
@@ -726,23 +764,24 @@ const unsub = manager.on('state_change', (state) => {
 subscribe(handler: (state: OverallState) => void): () => void
 ```
 
-Subscribe to the overall state of the manager. Svelte store compatible - immediately calls handler with current state, then on changes.
+Subscribe to the overall state of the manager. Svelte store compatible - immediately calls
+handler with current state, then on changes.
 
 **Parameters:**
 
-| Name | Type | Description |
-|------|------|-------------|
+| Name    | Type       | Description                      |
+| ------- | ---------- | -------------------------------- |
 | handler | `function` | Callback receiving overall state |
 
 **Overall State Object:**
 
 ```typescript
 {
-  state: WebRTCState;
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
-  dataChannels: ReadonlyMap<string, RTCDataChannel>;
-  peerConnection: RTCPeerConnection | null;
+	state: WebRTCState;
+	localStream: MediaStream | null;
+	remoteStream: MediaStream | null;
+	dataChannels: ReadonlyMap<string, RTCDataChannel>;
+	peerConnection: RTCPeerConnection | null;
 }
 ```
 
@@ -762,7 +801,7 @@ Subscribe to the overall state of the manager. Svelte store compatible - immedia
 
 ```typescript
 const unsub = manager.subscribe((state) => {
-  console.log('Overall state:', state);
+	console.log("Overall state:", state);
 });
 ```
 
@@ -797,24 +836,25 @@ Console-compatible logger interface for custom logging implementations.
 
 ```typescript
 interface Logger {
-  debug: (...args: any[]) => any;
-  log: (...args: any[]) => any;
-  warn: (...args: any[]) => any;
-  error: (...args: any[]) => any;
+	debug: (...args: any[]) => any;
+	log: (...args: any[]) => any;
+	warn: (...args: any[]) => any;
+	error: (...args: any[]) => any;
 }
 ```
 
-Each method accepts variadic arguments and returns a string representation of the first argument. This enables patterns like `throw new Error(logger.error("msg"))`.
+Each method accepts variadic arguments and returns a string representation of the first
+argument. This enables patterns like `throw new Error(logger.error("msg"))`.
 
 **Example Custom Logger:**
 
 ```typescript
-import { clog } from '@marianmeres/clog';
+import { clog } from "@marianmeres/clog";
 
-const logger = clog('WebRTC');
+const logger = clog("WebRTC");
 
 const manager = new WebRTCManager(factory, {
-  logger: logger,
+	logger: logger,
 });
 ```
 
@@ -826,9 +866,9 @@ Interface for dependency injection of WebRTC primitives.
 
 ```typescript
 interface WebRTCFactory {
-  createPeerConnection(config?: RTCConfiguration): RTCPeerConnection;
-  getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
-  enumerateDevices(): Promise<MediaDeviceInfo[]>;
+	createPeerConnection(config?: RTCConfiguration): RTCPeerConnection;
+	getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+	enumerateDevices(): Promise<MediaDeviceInfo[]>;
 }
 ```
 
@@ -836,9 +876,9 @@ interface WebRTCFactory {
 
 ```typescript
 const factory: WebRTCFactory = {
-  createPeerConnection: (config) => new RTCPeerConnection(config),
-  getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-  enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
+	createPeerConnection: (config) => new RTCPeerConnection(config),
+	getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+	enumerateDevices: () => navigator.mediaDevices.enumerateDevices(),
 };
 ```
 
@@ -850,52 +890,52 @@ Configuration options for WebRTCManager.
 
 ```typescript
 interface WebRTCManagerConfig {
-  /** RTCConfiguration for ICE servers, certificates, etc. */
-  peerConfig?: RTCConfiguration;
+	/** RTCConfiguration for ICE servers, certificates, etc. */
+	peerConfig?: RTCConfiguration;
 
-  /** Enable microphone on initialization. Default: false */
-  enableMicrophone?: boolean;
+	/** Enable microphone on initialization. Default: false */
+	enableMicrophone?: boolean;
 
-  /**
-   * Direction of the audio transceiver added during `initialize()` when the
-   * microphone is NOT enabled. Default: "recvonly".
-   * Use "sendrecv" if you plan to enable the mic later and want to avoid
-   * renegotiation when the track is added.
-   * Added in 2.0.
-   */
-  audioDirection?: RTCRtpTransceiverDirection;
+	/**
+	 * Direction of the audio transceiver added during `initialize()` when the
+	 * microphone is NOT enabled. Default: "recvonly".
+	 * Use "sendrecv" if you plan to enable the mic later and want to avoid
+	 * renegotiation when the track is added.
+	 * Added in 2.0.
+	 */
+	audioDirection?: RTCRtpTransceiverDirection;
 
-  /** Create a data channel with this label on connect */
-  dataChannelLabel?: string;
+	/** Create a data channel with this label on connect */
+	dataChannelLabel?: string;
 
-  /** Enable automatic reconnection on failure. Default: false */
-  autoReconnect?: boolean;
+	/** Enable automatic reconnection on failure. Default: false */
+	autoReconnect?: boolean;
 
-  /** Maximum reconnection attempts. Default: 5 */
-  maxReconnectAttempts?: number;
+	/** Maximum reconnection attempts. Default: 5 */
+	maxReconnectAttempts?: number;
 
-  /** Initial reconnection delay in ms (doubles each attempt). Default: 1000 */
-  reconnectDelay?: number;
+	/** Initial reconnection delay in ms (doubles each attempt). Default: 1000 */
+	reconnectDelay?: number;
 
-  /**
-   * Timeout in ms for an "ice-restart" attempt to reach connected state.
-   * When it elapses the attempt counts as failed and the next one is scheduled.
-   * Default: 10000. Added in 2.2.
-   */
-  iceRestartTimeout?: number;
+	/**
+	 * Timeout in ms for an "ice-restart" attempt to reach connected state.
+	 * When it elapses the attempt counts as failed and the next one is scheduled.
+	 * Default: 10000. Added in 2.2.
+	 */
+	iceRestartTimeout?: number;
 
-  /** Timeout in ms for a "full" reconnection attempt to reach connected state. Default: 30000 */
-  fullReconnectTimeout?: number;
+	/** Timeout in ms for a "full" reconnection attempt to reach connected state. Default: 30000 */
+	fullReconnectTimeout?: number;
 
-  /** Callback to control whether reconnection should proceed */
-  shouldReconnect?: (context: {
-    attempt: number;
-    maxAttempts: number;
-    strategy: "ice-restart" | "full";
-  }) => boolean;
+	/** Callback to control whether reconnection should proceed */
+	shouldReconnect?: (context: {
+		attempt: number;
+		maxAttempts: number;
+		strategy: "ice-restart" | "full";
+	}) => boolean;
 
-  /** Custom logger instance. If not provided, falls back to console. */
-  logger?: Logger;
+	/** Custom logger instance. If not provided, falls back to console. */
+	logger?: Logger;
 }
 ```
 
@@ -907,23 +947,23 @@ Options for `gatherIceCandidates()`.
 
 ```typescript
 interface GatherIceCandidatesOptions {
-  /** Timeout in milliseconds. Default: 10000 */
-  timeout?: number;
+	/** Timeout in milliseconds. Default: 10000 */
+	timeout?: number;
 
-  /**
-   * Called for each real ICE candidate as it's gathered.
-   * The terminal `null` (end-of-gathering sentinel) is NOT forwarded —
-   * use the returned promise's resolution to detect completion.
-   */
-  onCandidate?: (candidate: RTCIceCandidate) => void;
+	/**
+	 * Called for each real ICE candidate as it's gathered.
+	 * The terminal `null` (end-of-gathering sentinel) is NOT forwarded —
+	 * use the returned promise's resolution to detect completion.
+	 */
+	onCandidate?: (candidate: RTCIceCandidate) => void;
 
-  /**
-   * When true, the returned promise resolves instead of rejecting on timeout.
-   * Useful for HTTP-POST signaling where partial candidates are better than none.
-   * Default: false.
-   * Added in 2.0.
-   */
-  resolveOnTimeout?: boolean;
+	/**
+	 * When true, the returned promise resolves instead of rejecting on timeout.
+	 * Useful for HTTP-POST signaling where partial candidates are better than none.
+	 * Default: false.
+	 * Added in 2.0.
+	 */
+	resolveOnTimeout?: boolean;
 }
 ```
 
@@ -935,25 +975,25 @@ Enum of possible connection states.
 
 ```typescript
 enum WebRTCState {
-  IDLE = "IDLE",
-  INITIALIZING = "INITIALIZING",
-  CONNECTING = "CONNECTING",
-  CONNECTED = "CONNECTED",
-  RECONNECTING = "RECONNECTING",
-  DISCONNECTED = "DISCONNECTED",
-  ERROR = "ERROR"
+	IDLE = "IDLE",
+	INITIALIZING = "INITIALIZING",
+	CONNECTING = "CONNECTING",
+	CONNECTED = "CONNECTED",
+	RECONNECTING = "RECONNECTING",
+	DISCONNECTED = "DISCONNECTED",
+	ERROR = "ERROR",
 }
 ```
 
-| State | Description |
-|-------|-------------|
-| IDLE | Initial state, no resources allocated |
-| INITIALIZING | Creating peer connection and setting up |
-| CONNECTING | Performing offer/answer exchange |
-| CONNECTED | Connection established, ready for communication |
-| RECONNECTING | Attempting to restore failed connection |
-| DISCONNECTED | Connection closed, can reconnect |
-| ERROR | Error occurred, must call `reset()` |
+| State        | Description                                     |
+| ------------ | ----------------------------------------------- |
+| IDLE         | Initial state, no resources allocated           |
+| INITIALIZING | Creating peer connection and setting up         |
+| CONNECTING   | Performing offer/answer exchange                |
+| CONNECTED    | Connection established, ready for communication |
+| RECONNECTING | Attempting to restore failed connection         |
+| DISCONNECTED | Connection closed, can reconnect                |
+| ERROR        | Error occurred, must call `reset()`             |
 
 ---
 
@@ -963,13 +1003,13 @@ Internal FSM events (for reference).
 
 ```typescript
 enum WebRTCFsmEvent {
-  INIT = "initialize",
-  CONNECT = "connect",
-  CONNECTED = "connected",
-  RECONNECTING = "reconnecting",
-  DISCONNECT = "disconnect",
-  ERROR = "error",
-  RESET = "reset"
+	INIT = "initialize",
+	CONNECT = "connect",
+	CONNECTED = "connected",
+	RECONNECTING = "reconnecting",
+	DISCONNECT = "disconnect",
+	ERROR = "error",
+	RESET = "reset",
 }
 ```
 
@@ -981,22 +1021,22 @@ Type definition for all events and their payloads.
 
 ```typescript
 interface WebRTCEvents {
-  state_change: WebRTCState;
-  local_stream: MediaStream | null;
-  remote_stream: MediaStream | null;
-  data_channel_open: RTCDataChannel;
-  data_channel_message: { channel: RTCDataChannel; data: any };
-  data_channel_close: RTCDataChannel;
-  ice_candidate: RTCIceCandidate | null;
-  reconnecting: { attempt: number; strategy: "ice-restart" | "full" };
-  reconnect_failed: { attempts: number };
-  device_changed: MediaDeviceInfo[];
-  microphone_failed: { error?: any; reason?: string };
-  error: Error;
-  /** (2.0) Local offer produced by iceRestart(); forward via signaling. */
-  ice_restart_offer: RTCSessionDescriptionInit;
-  /** (2.0) Forwarded from pc.onnegotiationneeded. */
-  negotiation_needed: undefined;
+	state_change: WebRTCState;
+	local_stream: MediaStream | null;
+	remote_stream: MediaStream | null;
+	data_channel_open: RTCDataChannel;
+	data_channel_message: { channel: RTCDataChannel; data: any };
+	data_channel_close: RTCDataChannel;
+	ice_candidate: RTCIceCandidate | null;
+	reconnecting: { attempt: number; strategy: "ice-restart" | "full" };
+	reconnect_failed: { attempts: number };
+	device_changed: MediaDeviceInfo[];
+	microphone_failed: { error?: any; reason?: string };
+	error: Error;
+	/** (2.0) Local offer produced by iceRestart(); forward via signaling. */
+	ice_restart_offer: RTCSessionDescriptionInit;
+	/** (2.0) Forwarded from pc.onnegotiationneeded. */
+	negotiation_needed: undefined;
 }
 ```
 
@@ -1006,28 +1046,28 @@ interface WebRTCEvents {
 
 Static event name constants on `WebRTCManager`.
 
-| Constant | Value | Payload |
-|----------|-------|---------|
-| `EVENT_STATE_CHANGE` | `"state_change"` | `WebRTCState` |
-| `EVENT_LOCAL_STREAM` | `"local_stream"` | `MediaStream \| null` (also fires `null` on teardown — 2.0) |
-| `EVENT_REMOTE_STREAM` | `"remote_stream"` | `MediaStream \| null` (also fires `null` on teardown — 2.0) |
-| `EVENT_DATA_CHANNEL_OPEN` | `"data_channel_open"` | `RTCDataChannel` |
-| `EVENT_DATA_CHANNEL_MESSAGE` | `"data_channel_message"` | `{ channel, data }` |
-| `EVENT_DATA_CHANNEL_CLOSE` | `"data_channel_close"` | `RTCDataChannel` |
-| `EVENT_ICE_CANDIDATE` | `"ice_candidate"` | `RTCIceCandidate \| null` |
-| `EVENT_ICE_RESTART_OFFER` | `"ice_restart_offer"` | `RTCSessionDescriptionInit` (2.0) |
-| `EVENT_NEGOTIATION_NEEDED` | `"negotiation_needed"` | `undefined` (2.0) |
-| `EVENT_RECONNECTING` | `"reconnecting"` | `{ attempt, strategy }` (2.2: fires when the attempt executes; for `"full"`, after the new peer connection exists) |
-| `EVENT_RECONNECT_FAILED` | `"reconnect_failed"` | `{ attempts }` |
-| `EVENT_DEVICE_CHANGED` | `"device_changed"` | `MediaDeviceInfo[]` |
-| `EVENT_MICROPHONE_FAILED` | `"microphone_failed"` | `{ error?, reason? }` |
-| `EVENT_ERROR` | `"error"` | `Error` |
+| Constant                     | Value                    | Payload                                                                                                            |
+| ---------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `EVENT_STATE_CHANGE`         | `"state_change"`         | `WebRTCState`                                                                                                      |
+| `EVENT_LOCAL_STREAM`         | `"local_stream"`         | `MediaStream \| null` (also fires `null` on teardown — 2.0)                                                        |
+| `EVENT_REMOTE_STREAM`        | `"remote_stream"`        | `MediaStream \| null` (also fires `null` on teardown — 2.0)                                                        |
+| `EVENT_DATA_CHANNEL_OPEN`    | `"data_channel_open"`    | `RTCDataChannel`                                                                                                   |
+| `EVENT_DATA_CHANNEL_MESSAGE` | `"data_channel_message"` | `{ channel, data }`                                                                                                |
+| `EVENT_DATA_CHANNEL_CLOSE`   | `"data_channel_close"`   | `RTCDataChannel`                                                                                                   |
+| `EVENT_ICE_CANDIDATE`        | `"ice_candidate"`        | `RTCIceCandidate \| null`                                                                                          |
+| `EVENT_ICE_RESTART_OFFER`    | `"ice_restart_offer"`    | `RTCSessionDescriptionInit` (2.0)                                                                                  |
+| `EVENT_NEGOTIATION_NEEDED`   | `"negotiation_needed"`   | `undefined` (2.0)                                                                                                  |
+| `EVENT_RECONNECTING`         | `"reconnecting"`         | `{ attempt, strategy }` (2.2: fires when the attempt executes; for `"full"`, after the new peer connection exists) |
+| `EVENT_RECONNECT_FAILED`     | `"reconnect_failed"`     | `{ attempts }`                                                                                                     |
+| `EVENT_DEVICE_CHANGED`       | `"device_changed"`       | `MediaDeviceInfo[]`                                                                                                |
+| `EVENT_MICROPHONE_FAILED`    | `"microphone_failed"`    | `{ error?, reason? }`                                                                                              |
+| `EVENT_ERROR`                | `"error"`                | `Error`                                                                                                            |
 
 **Usage:**
 
 ```typescript
 manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
-  // Send to remote peer
+	// Send to remote peer
 });
 ```
 
@@ -1075,98 +1115,120 @@ manager.on(WebRTCManager.EVENT_ICE_CANDIDATE, (candidate) => {
 
 ### Valid Transitions
 
-| From State | Event | To State | Notes |
-|------------|-------|----------|-------|
-| IDLE | INIT | INITIALIZING | |
-| IDLE | RESET | IDLE | 2.0 — idempotent reset |
-| INITIALIZING | CONNECT | CONNECTING | |
-| INITIALIZING | DISCONNECT | DISCONNECTED | 2.0 — was silent no-op |
-| INITIALIZING | ERROR | ERROR | |
-| INITIALIZING | RESET | IDLE | 2.0 — was silent no-op |
-| CONNECTING | CONNECTED | CONNECTED | |
-| CONNECTING | DISCONNECT | DISCONNECTED | |
-| CONNECTING | ERROR | ERROR | |
-| CONNECTING | RESET | IDLE | 2.0 — was silent no-op |
-| CONNECTED | DISCONNECT | DISCONNECTED | |
-| CONNECTED | ERROR | ERROR | |
-| CONNECTED | RESET | IDLE | 2.0 — was silent no-op |
-| RECONNECTING | CONNECT | CONNECTING | |
-| RECONNECTING | CONNECTED | CONNECTED | 2.0 — fixes ICE-restart stuck-state bug |
-| RECONNECTING | DISCONNECT | DISCONNECTED | |
-| RECONNECTING | ERROR | ERROR | 2.0 |
-| RECONNECTING | RESET | IDLE | |
-| DISCONNECTED | CONNECT | CONNECTING | |
-| DISCONNECTED | RECONNECTING | RECONNECTING | |
-| DISCONNECTED | RESET | IDLE | |
-| ERROR | RESET | IDLE | |
+| From State   | Event        | To State     | Notes                                   |
+| ------------ | ------------ | ------------ | --------------------------------------- |
+| IDLE         | INIT         | INITIALIZING |                                         |
+| IDLE         | RESET        | IDLE         | 2.0 — idempotent reset                  |
+| INITIALIZING | CONNECT      | CONNECTING   |                                         |
+| INITIALIZING | DISCONNECT   | DISCONNECTED | 2.0 — was silent no-op                  |
+| INITIALIZING | ERROR        | ERROR        |                                         |
+| INITIALIZING | RESET        | IDLE         | 2.0 — was silent no-op                  |
+| CONNECTING   | CONNECTED    | CONNECTED    |                                         |
+| CONNECTING   | DISCONNECT   | DISCONNECTED |                                         |
+| CONNECTING   | ERROR        | ERROR        |                                         |
+| CONNECTING   | RESET        | IDLE         | 2.0 — was silent no-op                  |
+| CONNECTED    | DISCONNECT   | DISCONNECTED |                                         |
+| CONNECTED    | ERROR        | ERROR        |                                         |
+| CONNECTED    | RESET        | IDLE         | 2.0 — was silent no-op                  |
+| RECONNECTING | CONNECT      | CONNECTING   |                                         |
+| RECONNECTING | CONNECTED    | CONNECTED    | 2.0 — fixes ICE-restart stuck-state bug |
+| RECONNECTING | DISCONNECT   | DISCONNECTED |                                         |
+| RECONNECTING | ERROR        | ERROR        | 2.0                                     |
+| RECONNECTING | RESET        | IDLE         |                                         |
+| DISCONNECTED | CONNECT      | CONNECTING   |                                         |
+| DISCONNECTED | RECONNECTING | RECONNECTING |                                         |
+| DISCONNECTED | RESET        | IDLE         |                                         |
+| ERROR        | RESET        | IDLE         |                                         |
 
-Events with no edge from the current state are ignored (debug log), never thrown. (2.2) Previously the FSM threw `Invalid transition …`, e.g. on a second `disconnect()` or on an error reported while already in `ERROR`.
+Events with no edge from the current state are ignored (debug log), never thrown. (2.2)
+Previously the FSM threw `Invalid transition …`, e.g. on a second `disconnect()` or on an
+error reported while already in `ERROR`.
 
 ### Peer Connection State Mapping
 
 How `RTCPeerConnection.connectionState` drives the FSM:
 
-| `connectionState` | FSM effect |
-|-------------------|------------|
-| `"connected"` | `CONNECTED` (from `CONNECTING` or `RECONNECTING`); resets the reconnect budget |
-| `"failed"` | `DISCONNECTED`, then `RECONNECTING` when `autoReconnect` is on |
-| `"closed"` | `DISCONNECTED` |
-| `"disconnected"` | **none** — logged as a warning only (2.2) |
+| `connectionState` | FSM effect                                                                     |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `"connected"`     | `CONNECTED` (from `CONNECTING` or `RECONNECTING`); resets the reconnect budget |
+| `"failed"`        | `DISCONNECTED`, then `RECONNECTING` when `autoReconnect` is on                 |
+| `"closed"`        | `DISCONNECTED`                                                                 |
+| `"disconnected"`  | **none** — logged as a warning only (2.2)                                      |
 
-`"disconnected"` is transient by spec: browsers report it on ICE hiccups (Wi-Fi switch, sleep/wake) and usually recover to `"connected"` without renegotiation. Transitioning on it left the FSM in `DISCONNECTED` next to a live connection, and a `connect()` from there tore the healthy connection down. A genuine loss surfaces as `"failed"` once ICE consent expires.
+`"disconnected"` is transient by spec: browsers report it on ICE hiccups (Wi-Fi switch,
+sleep/wake) and usually recover to `"connected"` without renegotiation. Transitioning on
+it left the FSM in `DISCONNECTED` next to a live connection, and a `connect()` from there
+tore the healthy connection down. A genuine loss surfaces as `"failed"` once ICE consent
+expires.
 
 ### Reconnection Strategy
 
 When `autoReconnect: true`:
 
-1. **Attempts 1-2:** ICE restart (quick, preserves connection). The new local offer is emitted via `ice_restart_offer`; forward it through signaling.
+1. **Attempts 1-2:** ICE restart (quick, preserves connection). The new local offer is
+   emitted via `ice_restart_offer`; forward it through signaling.
 2. **Attempts 3+:** Full reconnection (new peer connection)
 3. **Backoff:** `reconnectDelay * 2^(attempt-1)` milliseconds
-4. **Bound per attempt:** `iceRestartTimeout` (default 10 s) for ICE restarts, `fullReconnectTimeout` (default 30 s) for full reconnects. An attempt that doesn't reach `CONNECTED` in time counts as failed and the next one is scheduled. (2.2) Previously ICE-restart attempts were unbounded.
-5. **Exhaustion:** after `maxReconnectAttempts` failed attempts, `reconnect_failed` is emitted and the manager stays in `DISCONNECTED`. (2.2) Previously the counter reset on every full reconnect, so this never happened.
+4. **Bound per attempt:** `iceRestartTimeout` (default 10 s) for ICE restarts,
+   `fullReconnectTimeout` (default 30 s) for full reconnects. An attempt that doesn't
+   reach `CONNECTED` in time counts as failed and the next one is scheduled. (2.2)
+   Previously ICE-restart attempts were unbounded.
+5. **Exhaustion:** after `maxReconnectAttempts` failed attempts, `reconnect_failed` is
+   emitted and the manager stays in `DISCONNECTED`. (2.2) Previously the counter reset on
+   every full reconnect, so this never happened.
 
-`reconnecting` fires when an attempt executes (after its backoff), not when it is scheduled. A failed attempt never moves the FSM to `ERROR`; only `initialize()` failing during a full reconnect does, and auto-reconnect does not run from `ERROR` (call `reset()`). An explicit `connect()` / `disconnect()` / `reset()` during the backoff cancels the scheduled attempt.
+`reconnecting` fires when an attempt executes (after its backoff), not when it is
+scheduled. A failed attempt never moves the FSM to `ERROR`; only `initialize()` failing
+during a full reconnect does, and auto-reconnect does not run from `ERROR` (call
+`reset()`). An explicit `connect()` / `disconnect()` / `reset()` during the backoff
+cancels the scheduled attempt.
 
 #### Full Reconnection and Signaling
 
-**Important:** For "full" strategy reconnections, the manager creates a new peer connection but **cannot automatically complete the signaling handshake**. You must listen for the `reconnecting` event and re-perform signaling when `strategy === 'full'`. (2.2) The event fires only once the new peer connection exists, so `createOffer()` in the handler targets the right connection:
+**Important:** For "full" strategy reconnections, the manager creates a new peer
+connection but **cannot automatically complete the signaling handshake**. You must listen
+for the `reconnecting` event and re-perform signaling when `strategy === 'full'`. (2.2)
+The event fires only once the new peer connection exists, so `createOffer()` in the
+handler targets the right connection:
 
 ```typescript
-manager.on('reconnecting', async ({ attempt, strategy }) => {
-  if (strategy === 'full') {
-    // Re-do offer/answer exchange on the new peer connection
-    const offer = await manager.createOffer();
-    await manager.setLocalDescription(offer);
-    sendToRemote(offer);
-  }
-  // For 'ice-restart', forward the offer from 'ice_restart_offer' instead
+manager.on("reconnecting", async ({ attempt, strategy }) => {
+	if (strategy === "full") {
+		// Re-do offer/answer exchange on the new peer connection
+		const offer = await manager.createOffer();
+		await manager.setLocalDescription(offer);
+		sendToRemote(offer);
+	}
+	// For 'ice-restart', forward the offer from 'ice_restart_offer' instead
 });
 ```
 
 ### Conditional Reconnection
 
-Use the `shouldReconnect` callback to suppress reconnection when the peer disconnected intentionally:
+Use the `shouldReconnect` callback to suppress reconnection when the peer disconnected
+intentionally:
 
 ```typescript
 let peerLeftIntentionally = false;
 
 const manager = new WebRTCManager(factory, {
-  autoReconnect: true,
-  shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
-    // Return false to suppress reconnection
-    return !peerLeftIntentionally;
-  },
+	autoReconnect: true,
+	shouldReconnect: ({ attempt, maxAttempts, strategy }) => {
+		// Return false to suppress reconnection
+		return !peerLeftIntentionally;
+	},
 });
 
 // Track intentional disconnects via data channel
-manager.on('data_channel_message', ({ data }) => {
-  if (JSON.parse(data).type === 'bye') {
-    peerLeftIntentionally = true;
-  }
+manager.on("data_channel_message", ({ data }) => {
+	if (JSON.parse(data).type === "bye") {
+		peerLeftIntentionally = true;
+	}
 });
 ```
 
 The callback receives:
+
 - `attempt`: Current attempt number (1-based)
 - `maxAttempts`: Configured maximum attempts
 - `strategy`: `"ice-restart"` or `"full"`

@@ -1,7 +1,7 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { WebRTCManager } from "../src/webrtc-manager.ts";
-import { WebRTCState, type Logger } from "../src/types.ts";
-import { MockWebRTCFactory, type MockRTCPeerConnection } from "./mocks.ts";
+import { type Logger, WebRTCState } from "../src/types.ts";
+import { type MockRTCPeerConnection, MockWebRTCFactory } from "./mocks.ts";
 import { createClog } from "@marianmeres/clog";
 
 // do not debug
@@ -59,8 +59,9 @@ Deno.test("PubSub Notifications", async () => {
 
 	const events: string[] = [];
 	manager.on("state_change", (state) => events.push(`state:${state}`));
-	manager.on("local_stream", (stream) =>
-		events.push(`stream:${stream ? "active" : "inactive"}`)
+	manager.on(
+		"local_stream",
+		(stream) => events.push(`stream:${stream ? "active" : "inactive"}`),
 	);
 
 	await manager.initialize();
@@ -196,7 +197,7 @@ Deno.test("Custom Logger - errors are logged via logger", async () => {
 	// Error logs include the prefix in the message
 	assertEquals(
 		String(errorLogs[0].args[0]).startsWith("[WebRTCManager]"),
-		true
+		true,
 	);
 });
 
@@ -209,7 +210,7 @@ Deno.test(
 		const manager = new WebRTCManager(factory);
 
 		assertEquals(manager.state, WebRTCState.IDLE);
-	}
+	},
 );
 
 // --- gatherIceCandidates tests ---
@@ -233,7 +234,7 @@ Deno.test(
 
 		// Should resolve without error
 		await gatherPromise;
-	}
+	},
 );
 
 Deno.test(
@@ -264,7 +265,7 @@ Deno.test(
 		assertEquals(candidates.length, 2);
 		assertEquals(candidates[0], mockCandidate1);
 		assertEquals(candidates[1], mockCandidate2);
-	}
+	},
 );
 
 Deno.test(
@@ -279,7 +280,7 @@ Deno.test(
 			timeout: 30,
 			resolveOnTimeout: true,
 		});
-	}
+	},
 );
 
 Deno.test("gatherIceCandidates - throws on timeout", async () => {
@@ -292,7 +293,7 @@ Deno.test("gatherIceCandidates - throws on timeout", async () => {
 	await assertRejects(
 		() => manager.gatherIceCandidates({ timeout: 50 }),
 		Error,
-		"ICE gathering timeout"
+		"ICE gathering timeout",
 	);
 });
 
@@ -311,7 +312,7 @@ Deno.test(
 
 		// Should resolve immediately
 		await manager.gatherIceCandidates();
-	}
+	},
 );
 
 Deno.test(
@@ -325,9 +326,9 @@ Deno.test(
 		await assertRejects(
 			() => manager.gatherIceCandidates(),
 			Error,
-			"Peer connection not initialized"
+			"Peer connection not initialized",
 		);
-	}
+	},
 );
 
 // --- Bug fix regression tests ---
@@ -391,7 +392,7 @@ Deno.test(
 		// FSM is still RECONNECTING. This used to be silently ignored.
 		pc.simulateConnectionState("connected");
 		assertEquals(manager.state, WebRTCState.CONNECTED);
-	}
+	},
 );
 
 Deno.test("cleanup publishes null for local_stream and remote_stream", async () => {
@@ -454,7 +455,7 @@ Deno.test(
 		assertEquals(reconnectFailedCount, 1);
 		// Clears the pending ice-restart attempt timeout.
 		manager.dispose();
-	}
+	},
 );
 
 Deno.test("dispose() unsubscribes all listeners", async () => {
@@ -499,7 +500,7 @@ Deno.test("switchMicrophone promotes recvonly transceiver to sendrecv", async ()
 	if (tx) {
 		assertEquals(
 			(tx as unknown as { direction: string }).direction,
-			"sendrecv"
+			"sendrecv",
 		);
 	}
 });
@@ -515,7 +516,7 @@ Deno.test("audioDirection config respected on initialize", async () => {
 	const tx = pc.getTransceivers()[0];
 	assertEquals(
 		(tx as unknown as { direction: string }).direction,
-		"sendrecv"
+		"sendrecv",
 	);
 });
 
@@ -609,7 +610,10 @@ Deno.test(
 		pc.setRemoteDescription = () => Promise.reject(new Error("bad sdp"));
 		pc.addIceCandidate = () => Promise.reject(new Error("no remote description"));
 
-		assertEquals(await manager.setRemoteDescription({ type: "answer", sdp: "x" }), false);
+		assertEquals(
+			await manager.setRemoteDescription({ type: "answer", sdp: "x" }),
+			false,
+		);
 		assertEquals(manager.state, WebRTCState.ERROR);
 
 		// Queued candidates keep arriving via signaling after the failure.
@@ -618,7 +622,7 @@ Deno.test(
 		// Both real errors are surfaced; the FSM never masks them with its own.
 		assertEquals(errors.length, 2);
 		assertEquals((errors[1] as Error).message, "no remote description");
-	}
+	},
 );
 
 Deno.test(
@@ -642,7 +646,7 @@ Deno.test(
 		await new Promise((r) => setTimeout(r, 20));
 		assertEquals(manager.state, WebRTCState.ERROR);
 		assertEquals(reconnecting, 0);
-	}
+	},
 );
 
 // --- Reconnection budget and strategy sequencing ---
@@ -668,9 +672,10 @@ Deno.test(
 		manager.on("reconnect_failed", ({ attempts }) => failed.push(attempts));
 
 		await manager.connect();
-		(manager.peerConnection as unknown as MockRTCPeerConnection).simulateConnectionState(
-			"connected"
-		);
+		(manager.peerConnection as unknown as MockRTCPeerConnection)
+			.simulateConnectionState(
+				"connected",
+			);
 		// Every attempt fails: the PC flips to "failed" again after each one. A
 		// real PC only fires connectionstatechange on a change, so once the budget
 		// is exhausted (state parks in DISCONNECTED) nothing further is reported.
@@ -686,7 +691,7 @@ Deno.test(
 		assertEquals(strategies, ["ice-restart", "ice-restart", "full", "full"]);
 		assertEquals(failed, [4]);
 		assertEquals(manager.state, WebRTCState.DISCONNECTED);
-	}
+	},
 );
 
 Deno.test(
@@ -711,7 +716,7 @@ Deno.test(
 		await new Promise((r) => setTimeout(r, 40));
 		assertEquals(attempts.slice(0, 2), [1, 2]);
 		manager.dispose();
-	}
+	},
 );
 
 Deno.test(
@@ -731,7 +736,10 @@ Deno.test(
 		let atEvent: { samePc: boolean; state: WebRTCState } | null = null;
 		manager.on("reconnecting", ({ strategy }) => {
 			if (strategy === "full") {
-				atEvent = { samePc: manager.peerConnection === oldPc, state: manager.state };
+				atEvent = {
+					samePc: manager.peerConnection === oldPc,
+					state: manager.state,
+				};
 			}
 		});
 
@@ -747,7 +755,7 @@ Deno.test(
 		assertEquals(seen.samePc, false);
 		assertEquals(seen.state, WebRTCState.CONNECTING);
 		manager.dispose();
-	}
+	},
 );
 
 Deno.test(
@@ -773,7 +781,7 @@ Deno.test(
 		await new Promise((r) => setTimeout(r, 40));
 		assertEquals(reconnecting, 0);
 		assertEquals(manager.state, WebRTCState.CONNECTING);
-	}
+	},
 );
 
 // --- Transient "disconnected" ---
@@ -802,7 +810,7 @@ Deno.test(
 		pc.simulateConnectionState("failed");
 		assertEquals(manager.state, WebRTCState.DISCONNECTED);
 		assertEquals(states.filter((s) => s === WebRTCState.DISCONNECTED).length, 1);
-	}
+	},
 );
 
 // --- Pre-acquired microphone ---
@@ -823,7 +831,7 @@ Deno.test(
 		assertEquals(manager.localStream, stream);
 		assertEquals(pc.getSenders().length, 1);
 		assertEquals(pc.getSenders()[0].track, stream!.getAudioTracks()[0]);
-	}
+	},
 );
 
 // --- Typed on() ---

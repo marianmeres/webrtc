@@ -92,8 +92,7 @@ export class MockRTCPeerConnection extends EventTarget {
 	// deno-lint-ignore no-explicit-any
 	ondatachannel: ((this: any, ev: RTCDataChannelEvent) => any) | null = null;
 	// deno-lint-ignore no-explicit-any
-	onicecandidate: ((this: any, ev: RTCPeerConnectionIceEvent) => any) | null =
-		null;
+	onicecandidate: ((this: any, ev: RTCPeerConnectionIceEvent) => any) | null = null;
 	// deno-lint-ignore no-explicit-any
 	onnegotiationneeded: ((this: any, ev: Event) => any) | null = null;
 
@@ -127,7 +126,7 @@ export class MockRTCPeerConnection extends EventTarget {
 
 	createDataChannel(
 		label: string,
-		options?: RTCDataChannelInit
+		options?: RTCDataChannelInit,
 	): RTCDataChannel {
 		const channel = new MockRTCDataChannel(label);
 		this.#dataChannels.push(channel);
@@ -136,11 +135,10 @@ export class MockRTCPeerConnection extends EventTarget {
 
 	addTransceiver(
 		trackOrKind: MediaStreamTrack | string,
-		init?: RTCRtpTransceiverInit
+		init?: RTCRtpTransceiverInit,
 	): RTCRtpTransceiver {
 		// Mock implementation - create a basic transceiver and store it
-		const kind =
-			typeof trackOrKind === "string" ? trackOrKind : trackOrKind.kind;
+		const kind = typeof trackOrKind === "string" ? trackOrKind : trackOrKind.kind;
 		let currentTrack = typeof trackOrKind === "string" ? null : trackOrKind;
 
 		const transceiver = {
@@ -210,11 +208,12 @@ export class MockRTCPeerConnection extends EventTarget {
 	override removeEventListener(type: string, listener: any) {
 		if (type === "icecandidate") {
 			this.#iceCandidateListeners = this.#iceCandidateListeners.filter(
-				(l) => l !== listener
+				(l) => l !== listener,
 			);
 		} else if (type === "icegatheringstatechange") {
-			this.#iceGatheringStateListeners =
-				this.#iceGatheringStateListeners.filter((l) => l !== listener);
+			this.#iceGatheringStateListeners = this.#iceGatheringStateListeners.filter((
+				l,
+			) => l !== listener);
 		}
 		// Call parent for other event types
 		super.removeEventListener(type, listener);
@@ -283,7 +282,7 @@ export class MockWebRTCFactory {
 			tracks.push(new MockMediaStreamTrack("video"));
 		}
 		return Promise.resolve(
-			new MockMediaStream(tracks) as unknown as MediaStream
+			new MockMediaStream(tracks) as unknown as MediaStream,
 		);
 	}
 

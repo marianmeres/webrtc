@@ -9,7 +9,7 @@ export const factory = {
 
 // Peer connection config with STUN server
 export const peerConfig = {
-	iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+	iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
 
 /**
@@ -29,7 +29,7 @@ export function createBeepStream(frequency = 440, duration = 500) {
 	const destination = audioCtx.createMediaStreamDestination();
 
 	// Configure oscillator
-	oscillator.type = 'sine';
+	oscillator.type = "sine";
 	oscillator.frequency.value = frequency;
 
 	// Connect: oscillator -> gain -> destination
@@ -55,7 +55,7 @@ export function createBeepStream(frequency = 440, duration = 500) {
 				// Already stopped
 			}
 			audioCtx.close();
-		}
+		},
 	};
 }
 
@@ -67,7 +67,7 @@ export function createBeepStream(frequency = 440, duration = 500) {
  */
 export function createLogger(logEl) {
 	return (msg) => {
-		const line = document.createElement('div');
+		const line = document.createElement("div");
 		line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
 		logEl.appendChild(line);
 		logEl.scrollTop = logEl.scrollHeight;
@@ -86,17 +86,17 @@ export function setupBidirectionalAudio(pc) {
 
 	// Set ALL audio transceivers to sendrecv
 	for (const t of transceivers) {
-		if (t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio') {
+		if (t.receiver.track?.kind === "audio" || t.sender.track?.kind === "audio") {
 			foundAudio = true;
-			if (t.direction === 'recvonly' || t.direction === 'sendonly') {
-				t.direction = 'sendrecv';
+			if (t.direction === "recvonly" || t.direction === "sendonly") {
+				t.direction = "sendrecv";
 			}
 		}
 	}
 
 	// Only add new transceiver if no audio transceivers exist
 	if (!foundAudio) {
-		pc.addTransceiver('audio', { direction: 'sendrecv' });
+		pc.addTransceiver("audio", { direction: "sendrecv" });
 	}
 }
 
@@ -115,7 +115,7 @@ export function sendBeep(pc, frequency = 440, duration = 500) {
 
 	// Use the last audio transceiver (the one from negotiation)
 	const audioTransceivers = pc.getTransceivers().filter(
-		t => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
+		(t) => t.receiver.track?.kind === "audio" || t.sender.track?.kind === "audio",
 	);
 	const transceiver = audioTransceivers[audioTransceivers.length - 1];
 
